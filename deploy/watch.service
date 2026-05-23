@@ -1,0 +1,23 @@
+[Unit]
+Description=watch — synchronized kinogo viewer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=watch
+WorkingDirectory=/opt/watch
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/watch.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/watch/data /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>watch — синхронный просмотр</title>
+  <link rel="icon" href="{{BASE_PATH}}/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="{{BASE_PATH}}/static/styles.css" />
+  <script>window.__WATCH_BASE_PATH = '{{BASE_PATH}}';</script>
+</head>
+<body class="page-home">
+  <main>
+    <header>
+      <h1>watch<span class="dot">.</span></h1>
+      <p class="tag">Открой фильм с kinogo — раздай ссылку друзьям. Все смотрят синхронно.</p>
+    </header>
+
+    <form id="form-url">
+      <input
+        type="url"
+        id="url"
+        name="url"
+        placeholder="https://lv.kinogo.ec/9957--pacany-1.html"
+        autocomplete="off"
+        spellcheck="false"
+        required
+      />
+      <button type="submit" id="submit">Создать комнату</button>
+    </form>
+
+    <output id="status" class="status" hidden></output>
+
+    <section id="result" class="result" hidden>
+      <p>Готово. Раздай эту ссылку друзьям:</p>
+      <div class="join">
+        <input type="text" id="joinUrl" readonly />
+        <button id="copy" type="button">Скопировать</button>
+      </div>
+      <a id="open" class="open">Открыть плеер →</a>
+    </section>
+
+    <footer>
+      <p>В комнате лидер выбирает сезон, серию и озвучку — друзья смотрят синхронно.</p>
+    </footer>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const form = $('form-url');
+    const status = $('status');
+    const result = $('result');
+    const submit = $('submit');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submit.disabled = true;
+      result.hidden = true;
+      status.hidden = false;
+      status.classList.remove('status--err');
+      status.textContent = 'Открываю kinogo, ищу плеер… (10-20 сек)';
+      try {
+        const res = await fetch(window.__WATCH_BASE_PATH + '/api/extract', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: $('url').value.trim() }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.detail || j.error || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        status.hidden = true;
+        result.hidden = false;
+        $('joinUrl').value = data.joinUrl;
+        $('open').href = data.joinUrl;
+      } catch (err) {
+        status.textContent = 'Не получилось: ' + err.message;
+        status.classList.add('status--err');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    function copyToClipboard(text) {
+      // navigator.clipboard работает только в secure context (HTTPS/localhost) —
+      // на http://<ip>/ падает молча. Fallback на execCommand через скрытый textarea.
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+      }
+      return new Promise((resolve) => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch { ok = false; }
+        document.body.removeChild(ta);
+        resolve(ok);
+      });
+    }
+
+    $('copy').addEventListener('click', async () => {
+      const ok = await copyToClipboard($('joinUrl').value);
+      $('copy').textContent = ok ? 'Скопировано' : 'Не получилось';
+      setTimeout(() => ($('copy').textContent = 'Скопировать'), 1500);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+watch.example.com {
+	encode zstd gzip
+	@ws {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @ws 127.0.0.1:3000
+	reverse_proxy 127.0.0.1:3000 {
+		flush_interval -1
+	}
+}

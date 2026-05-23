@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>watch — комната</title>
+  <link rel="icon" href="{{BASE_PATH}}/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="{{BASE_PATH}}/static/styles.css" />
+  <script>window.__WATCH_BASE_PATH = '{{BASE_PATH}}';</script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+</head>
+<body class="page-room">
+  <div class="stage">
+    <video id="player" controls playsinline controlslist="nodownload noremoteplayback noplaybackrate"></video>
+    <div id="guest-controls" class="guest-controls" hidden>
+      <button id="gc-mute" type="button" class="gc-btn" aria-label="Звук">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="gc-icon-vol-on">
+          <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+          <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
+        </svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="gc-icon-vol-off" hidden>
+          <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+          <path d="M22 9l-6 6M16 9l6 6"/>
+        </svg>
+      </button>
+      <input id="gc-volume" class="gc-volume" type="range" min="0" max="100" value="100" aria-label="Громкость" />
+      <button id="gc-cc" type="button" class="gc-btn gc-btn-text" aria-label="Субтитры" hidden>CC</button>
+      <button id="gc-pip" type="button" class="gc-btn" aria-label="Picture-in-Picture">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"/>
+          <rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button id="gc-fs" type="button" class="gc-btn" aria-label="Полный экран">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="gc-icon-fs-enter">
+          <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/>
+        </svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="gc-icon-fs-exit" hidden>
+          <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6"/>
+        </svg>
+      </button>
+    </div>
+    <div class="hud">
+      <div class="hud-left">
+        <span id="role" class="badge">…</span>
+        <span id="viewers" class="badge muted">1 в комнате</span>
+        <span id="current" class="badge muted"></span>
+      </div>
+      <div class="hud-right">
+        <button id="picker-btn" class="ghost">Сменить серию</button>
+        <button id="copyLink" class="ghost">Скопировать ссылку</button>
+      </div>
+    </div>
+    <div id="picker" class="picker" hidden>
+      <div class="picker-card">
+        <div class="picker-row" id="row-season">
+          <label>Сезон</label>
+          <select id="sel-season"></select>
+        </div>
+        <div class="picker-row" id="row-episode">
+          <label>Серия</label>
+          <select id="sel-episode"></select>
+        </div>
+        <div class="picker-row">
+          <label>Озвучка</label>
+          <select id="sel-voice"></select>
+        </div>
+        <div class="picker-actions">
+          <button id="picker-cancel" type="button" class="ghost">Отмена</button>
+          <button id="picker-apply" type="button">Применить</button>
+        </div>
+        <p id="picker-hint" class="hint" hidden>Только лидер может менять источник.</p>
+      </div>
+    </div>
+    <div id="toast" class="toast" hidden></div>
+  </div>
+  <script src="{{BASE_PATH}}/static/player.js"></script>
+</body>
+</html>
