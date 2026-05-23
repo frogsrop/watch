@@ -16,6 +16,8 @@ export interface RoomCurrent {
   episodeTitle: string;
   voiceTitle: string;
   voiceFile: string;
+  /** Для venom-стримов (lordfilm): индекс audio track'а внутри master.m3u8. */
+  audioTrack?: number;
 }
 
 interface Member {

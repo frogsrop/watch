@@ -55,6 +55,16 @@
     toast._t = setTimeout(() => (toastEl.hidden = true), ms);
   }
 
+  function applyAudioTrack() {
+    if (!hls || !current) return;
+    const track = current.audioTrack;
+    if (typeof track !== 'number') return;
+    const tracks = hls.audioTracks || [];
+    if (track >= 0 && track < tracks.length && hls.audioTrack !== track) {
+      try { hls.audioTrack = track; } catch {}
+    }
+  }
+
   function loadSource(url) {
     if (hls) {
       try { hls.destroy(); } catch {}
@@ -64,6 +74,8 @@
       hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
       hls.loadSource(url);
       hls.attachMedia(video);
+      hls.on(window.Hls.Events.MANIFEST_PARSED, applyAudioTrack);
+      hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, applyAudioTrack);
       hls.on(window.Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) toast('Ошибка воспроизведения: ' + data.type);
       });
@@ -320,14 +332,30 @@
   }
 
   function applySourceChange(msg) {
+    const prev = current;
+    // Если сменилась только озвучка в venom-стриме (тот же эпизод, тот же hls,
+    // только другой audioTrack) — переключаем track без destroy/recreate hls.
+    const sameEpisode =
+      prev &&
+      msg.current &&
+      prev.seasonId === msg.current.seasonId &&
+      prev.episodeId === msg.current.episodeId &&
+      prev.voiceFile === msg.current.voiceFile &&
+      typeof msg.current.audioTrack === 'number';
+
     sourceVersion = msg.version;
     current = msg.current;
     updateCurrentBadge();
-    suppress = true;
-    video.pause();
-    video.currentTime = 0;
-    loadSource(manifestUrl());
-    queueMicrotask(() => (suppress = false));
+
+    if (sameEpisode && hls) {
+      applyAudioTrack();
+    } else {
+      suppress = true;
+      video.pause();
+      video.currentTime = 0;
+      loadSource(manifestUrl());
+      queueMicrotask(() => (suppress = false));
+    }
     toast(
       isMovie()
         ? `Озвучка: ${current.voiceTitle}`

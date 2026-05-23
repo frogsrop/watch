@@ -4,6 +4,9 @@ export interface VoiceInfo {
   voice_id?: number;
   title: string;
   file: string;
+  // Для venom-player'а (lordfilm): озвучка = audio track в одном master.m3u8.
+  // Если задано — клиент после loadSource выставит hls.audioTrack = audioTrack.
+  audioTrack?: number;
 }
 
 export interface EpisodeInfo {
@@ -28,7 +31,13 @@ export interface ExtractResult {
   cookies: { name: string; value: string; domain: string; path: string }[];
   userAgent: string;
   structure: PlayerStructure;
-  current: { seasonId: string; episodeId: string; voiceId?: number; voiceTitle: string };
+  current: {
+    seasonId: string;
+    episodeId: string;
+    voiceId?: number;
+    voiceTitle: string;
+    audioTrack?: number;
+  };
 }
 
 export interface SelectionOpts {
@@ -80,6 +89,55 @@ const CAPTURE_INIT = `
   });
 })();
 `;
+
+// Lordfilm/femd embed: парсим playlist напрямую из HTML-ответа api.femd.ws/embed/movie/*.
+// JS-side hook на VenomPlayer.make не работает: player-venom использует
+// Object.defineProperty(window, 'VenomPlayer', {value: ..., writable: true, configurable: true})
+// что ПЕРЕОПРЕДЕЛЯЕТ accessor-property с нашим setter'ом. Поэтому ловим HTTP-ответ
+// через page.on('response') и парсим инлайн `seasons:[...]`.
+
+/** Извлекает seasons-массив из embed HTML (venom inline JS). */
+function extractVenomSeasons(html: string): VenomSeason[] | null {
+  const marker = 'seasons:';
+  let idx = html.indexOf(marker);
+  if (idx < 0) return null;
+  idx += marker.length;
+  while (idx < html.length && /\s/.test(html.charAt(idx))) idx++;
+  if (html[idx] !== '[') return null;
+  const start = idx;
+  let depth = 0;
+  let inStr = false;
+  let escape = false;
+  for (; idx < html.length; idx++) {
+    const c = html[idx];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === '\\') {
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inStr = !inStr;
+      continue;
+    }
+    if (inStr) continue;
+    if (c === '[' || c === '{') depth++;
+    else if (c === ']' || c === '}') {
+      depth--;
+      if (depth === 0 && c === ']') {
+        idx++;
+        break;
+      }
+    }
+  }
+  try {
+    return JSON.parse(html.slice(start, idx));
+  } catch {
+    return null;
+  }
+}
 
 let sharedBrowser: Browser | null = null;
 let launchPromise: Promise<Browser> | null = null;
@@ -261,6 +319,137 @@ function structureFromCaptured(caps: RawPlaylistEntry[][]): PlayerStructure {
   return { seasons };
 }
 
+interface VenomEpisode {
+  episode?: string | number;
+  hls?: string;
+  audio?: { names?: string[]; order?: number[] };
+}
+
+interface VenomSeason {
+  season?: string | number;
+  episodes?: VenomEpisode[];
+}
+
+interface VenomConfig {
+  playlist?: { seasons?: VenomSeason[]; id?: number };
+}
+
+function structureFromVenom(configs: VenomConfig[]): PlayerStructure {
+  // Берём config с наибольшим числом эпизодов.
+  let best: VenomConfig | null = null;
+  let bestScore = 0;
+  for (const cfg of configs) {
+    const seasons = cfg?.playlist?.seasons;
+    if (!Array.isArray(seasons)) continue;
+    let n = 0;
+    for (const s of seasons) for (const _ of s.episodes ?? []) n++;
+    if (n > bestScore) {
+      best = cfg;
+      bestScore = n;
+    }
+  }
+  if (!best || !best.playlist?.seasons) return { seasons: [] };
+
+  const cleanTitle = (s: unknown): string =>
+    String(s ?? '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+
+  const seasons: SeasonInfo[] = [];
+  for (const s of best.playlist.seasons) {
+    const sId = String(s.season ?? '');
+    if (!sId) continue;
+    const sTitle = `Сезон ${sId}`;
+    const episodes: EpisodeInfo[] = [];
+    for (const e of s.episodes ?? []) {
+      if (!e.hls) continue;
+      const eId = String(e.episode ?? '');
+      const eTitle = `Серия ${eId}`;
+      const names = e.audio?.names ?? [];
+      const order = e.audio?.order ?? names.map((_, i) => i);
+      const voices: VoiceInfo[] = [];
+      if (names.length > 0) {
+        for (let i = 0; i < names.length; i++) {
+          voices.push({
+            title: cleanTitle(names[i]),
+            file: String(e.hls),
+            audioTrack: order[i] ?? i,
+          });
+        }
+      } else {
+        voices.push({ title: 'По умолчанию', file: String(e.hls), audioTrack: 0 });
+      }
+      episodes.push({ id: eId, title: eTitle, voices });
+    }
+    if (episodes.length) seasons.push({ id: sId, title: sTitle, episodes });
+  }
+  return { seasons };
+}
+
+async function captureFromLordfilm(
+  pageUrl: string,
+  timeoutMs: number,
+): Promise<{ playlist: PlayerStructure; cookies: ExtractResult['cookies'] }> {
+  const context = await newContext();
+  try {
+    const page = await context.newPage();
+    let embedBody: string | null = null;
+    // Перехватываем HTTP-ответ от api.femd.ws/embed/* — там в инлайн-JS лежит
+    // makePlayer({playlist: {seasons:[...]}}). Парсим seasons-массив прямо из HTML.
+    page.on('response', async (res) => {
+      if (embedBody) return;
+      const u = res.url();
+      if (/api\.femd\.ws\/embed\//.test(u)) {
+        try {
+          const body = await res.text();
+          if (body && body.length > 500) {
+            embedBody = body;
+            dbg(`venom: captured femd embed response ${u} (${body.length} bytes)`);
+          }
+        } catch (e) {
+          dbg(`venom: failed to read femd response: ${(e as Error).message}`);
+        }
+      }
+    });
+
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    // lordfilm не использует Cloudflare; embed iframe инжектится JS'ом lordfilm-страницы.
+    await activateLazyIframes(page);
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && !embedBody) {
+      await page.waitForTimeout(500);
+      await activateLazyIframes(page);
+    }
+
+    if (!embedBody) {
+      throw new ExtractorError('failed to capture femd embed response', 'playlist');
+    }
+
+    const seasons = extractVenomSeasons(embedBody);
+    if (!seasons || seasons.length === 0) {
+      throw new ExtractorError('failed to parse venom seasons from embed html', 'playlist');
+    }
+    const playlist = structureFromVenom([{ playlist: { seasons } }]);
+    if (playlist.seasons.length === 0) {
+      throw new ExtractorError('venom seasons parsed but empty after normalization', 'playlist');
+    }
+    const eps = playlist.seasons.reduce((acc, s) => acc + s.episodes.length, 0);
+    dbg(`venom: structured ${playlist.seasons.length} seasons, ${eps} eps`);
+
+    const cookies = await context.cookies();
+    return {
+      playlist,
+      cookies: cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+      })),
+    };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 async function captureFromKinogo(
   pageUrl: string,
   timeoutMs: number,
@@ -355,11 +544,22 @@ function matchVoice(episode: EpisodeInfo, selector?: string): VoiceInfo | null {
   return episode.voices[0] ?? null;
 }
 
+export function detectSource(url: string): 'kinogo' | 'lordfilm' | null {
+  if (/lordfilm/i.test(url)) return 'lordfilm';
+  if (/kinogo/i.test(url)) return 'kinogo';
+  return null;
+}
+
 export async function extractM3U8(
   pageUrl: string,
   opts: SelectionOpts & { timeoutMs?: number } = {},
 ): Promise<ExtractResult> {
-  const { playlist, cookies } = await captureFromKinogo(pageUrl, opts.timeoutMs ?? 45_000);
+  const source = detectSource(pageUrl);
+  if (!source) throw new ExtractorError('unsupported source url', 'playlist');
+  const capture = source === 'lordfilm' ? captureFromLordfilm : captureFromKinogo;
+  const referer = source === 'lordfilm' ? 'https://api.femd.ws/' : 'https://cinemar.cc/';
+
+  const { playlist, cookies } = await capture(pageUrl, opts.timeoutMs ?? 45_000);
 
   const season = matchSeason(playlist, opts.season);
   if (!season) throw new ExtractorError('no seasons in playlist', 'select');
@@ -368,11 +568,11 @@ export async function extractM3U8(
   const voice = matchVoice(episode, opts.voice);
   if (!voice) throw new ExtractorError(`${season.title}/${episode.title}: no voices`, 'select');
 
-  dbg(`selected ${season.title} / ${episode.title} / ${voice.title}`);
+  dbg(`selected ${season.title} / ${episode.title} / ${voice.title} (source=${source})`);
 
   return {
     m3u8: voice.file,
-    referer: 'https://cinemar.cc/',
+    referer,
     cookies,
     userAgent: UA,
     structure: playlist,
@@ -381,6 +581,7 @@ export async function extractM3U8(
       episodeId: episode.id,
       voiceId: voice.voice_id,
       voiceTitle: voice.title,
+      audioTrack: voice.audioTrack,
     },
   };
 }

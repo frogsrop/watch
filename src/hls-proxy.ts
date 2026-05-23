@@ -7,7 +7,7 @@ export interface SessionHeaders {
   cookies: { name: string; value: string; domain: string }[];
 }
 
-const ALLOWED_HOSTS_RE = /(^|\.)(cinemap\.cc|cinemar\.cc|aniqit\.com|kinogo\.ec)$/i;
+const ALLOWED_HOSTS_RE = /(^|\.)(cinemap\.cc|cinemar\.cc|aniqit\.com|kinogo\.ec|interkh\.com|femd\.ws)$/i;
 
 export function isAllowedHost(url: string): boolean {
   try {

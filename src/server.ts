@@ -74,13 +74,13 @@ function gcProbeCache() {
   }
 }
 
-function validateKinogoUrl(url: string): boolean {
-  return /^https?:\/\/[^\s]+kinogo[^\s]+$/i.test(url);
+function validateSourceUrl(url: string): boolean {
+  return /^https?:\/\/[^\s]+(kinogo|lordfilm)[^\s]+$/i.test(url);
 }
 
 fastify.post<{ Body: { url: string } }>(`${BASE_PATH}/api/probe`, async (req, reply) => {
   const url = String(req.body?.url ?? '').trim();
-  if (!validateKinogoUrl(url)) return reply.code(400).send({ error: 'invalid kinogo url' });
+  if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm only)' });
 
   gcProbeCache();
   const cached = probeCache.get(url);
@@ -118,6 +118,7 @@ function findInStructure(
   seasonTitle: string;
   episodeId: string;
   episodeTitle: string;
+  audioTrack?: number;
 } | null {
   const matchByNum = (text: string | undefined, candidates: { id: string; title: string }[]) => {
     if (!text) return candidates[0];
@@ -152,6 +153,7 @@ function findInStructure(
     seasonTitle: season_.title,
     episodeId: ep_.id,
     episodeTitle: ep_.title,
+    audioTrack: voiceObj.audioTrack,
   };
 }
 
@@ -159,7 +161,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
   `${BASE_PATH}/api/extract`,
   async (req, reply) => {
     const url = String(req.body?.url ?? '').trim();
-    if (!validateKinogoUrl(url)) return reply.code(400).send({ error: 'invalid kinogo url' });
+    if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm only)' });
     const season = req.body?.season?.trim() || undefined;
     const episode = req.body?.episode?.trim() || undefined;
     const voice = req.body?.voice?.trim() || undefined;
@@ -193,6 +195,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
           episodeTitle: found.episodeTitle,
           voiceTitle: found.voiceTitle,
           voiceFile: found.m3u8,
+          audioTrack: found.audioTrack,
         },
       });
       return reply.send({
@@ -228,6 +231,7 @@ fastify.post<{
     episodeTitle: found.episodeTitle,
     voiceTitle: found.voiceTitle,
     voiceFile: found.m3u8,
+    audioTrack: found.audioTrack,
   });
   return reply.send({ current: room.current, sourceVersion: room.sourceVersion });
 });

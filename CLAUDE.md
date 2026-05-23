@@ -4,9 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project goal
 
-Synchronized watch-party for kinogo.ec — host вставляет URL, друзья открывают ссылку и смотрят синхронно одно и то же видео. Лидер выбирает сезон/серию/озвучку (или озвучку для фильма) прямо в комнате; смена источника broadcast'ится всем зрителям.
+Synchronized watch-party — host вставляет URL, друзья открывают ссылку и смотрят синхронно одно и то же видео. Лидер выбирает сезон/серию/озвучку (или озвучку для фильма) прямо в комнате; смена источника broadcast'ится всем зрителям.
 
-Users в России. Self-hosted на одном VPS — kinogo сам играет в РФ, наш сервер только: (a) обходит Cloudflare на kinogo один раз через Playwright, (b) проксирует HLS-сегменты с `*.cinemap.cc` / `*.cinemar.cc` через свой домен с HMAC-подписями, (c) синхронизирует play/pause/seek по WebSocket.
+**Supported sources** (autodetected по URL):
+- **kinogo.ec** (cinemar embed) — Variant A сериал / Variant B фильм. Каждая озвучка = свой m3u8.
+- **lordfilm.*** (femd.ws embed → player-venom) — multi-track HLS: один master.m3u8 на эпизод, озвучка = `hls.audioTrack` индекс.
+
+Users в России. Self-hosted на одном VPS — kinogo/lordfilm сами играют в РФ, наш сервер только: (a) обходит Cloudflare на kinogo через Playwright (lordfilm без Cloudflare), (b) проксирует HLS-сегменты с whitelisted CDN'ов через свой домен с HMAC-подписями, (c) синхронизирует play/pause/seek по WebSocket.
 
 ## Current state — что работает
 
@@ -24,9 +28,10 @@ Self-hosted Ubuntu 22.04+ VPS (минимум 2 GB RAM / 1 vCPU + Node 22+, Goog
 - **Sync**: snapshot при welcome, playback/seek события мгновенно. Heartbeat от лидера каждые **10 сек** (`HEARTBEAT_INTERVAL_MS`), зритель ресинкается если дрифт **>1.5 сек** (`DRIFT_RESYNC_THRESHOLD_S`). Тюнятся через константы в `player.js`.
 
 ### Видеоконтент
-- **Сериалы** (Variant A): structureFromCaptured разбирает `[{folder: [episodes], ...}]` → seasons / episodes / voices.
-- **Фильмы** (Variant B): JSON.parse-hook ловит плоский массив озвучек `[{title, file}, ...]` → оборачивается в один сезон `id: 'film'` / один эпизод `id: 'film'` / N озвучек. UI определяет фильм через `isMovie()` (id == 'film').
-- Все сезоны × серии × до 16+ озвучек работают. Качество 240p–1080p — adaptive bitrate hls.js (ручного выбора в UI нет).
+- **kinogo сериал** (Variant A): JSON.parse-hook ловит `[{folder: [episodes], ...}]` → seasons / episodes / voices (каждая озвучка — свой m3u8).
+- **kinogo фильм** (Variant B): JSON.parse-hook ловит плоский `[{title, file}, ...]` → оборачивается в один сезон `id: 'film'` / один эпизод `id: 'film'` / N озвучек. UI определяет фильм через `isMovie()` (id == 'film').
+- **lordfilm** (Variant C, venom): `page.on('response')` ловит ответ `api.femd.ws/embed/movie/<id>` → `extractVenomSeasons()` парсит инлайн JS `seasons:[...]`. Каждый эпизод имеет ОДИН master.m3u8 + многоязычные audio tracks (LostFilm, AlexFilm, Кубик в кубе, и пр.). На клиенте: `hls.audioTrack = current.audioTrack` после `MANIFEST_PARSED` без destroy/recreate hls.
+- Все сезоны × серии × до 16+ озвучек работают. Качество 240p–1080p — adaptive bitrate hls.js.
 
 ## Архитектура
 
@@ -89,27 +94,27 @@ scripts/
 
 **Responsive**: `@media (max-width: 640px)` — landing form стэкается, HUD переходит в `flex-direction: column` (badges row сверху, buttons row снизу), `.hud .badge` получает `text-overflow: ellipsis` для длинных «Сезон 1 · Серия 1 · LostFilm (Проф. многоголосый)». `@media (max-width: 480px)` — HUD/guest-controls compact, picker rows стэкаются.
 
-## КЛЮЧЕВАЯ НАХОДКА — как извлекается playlist
+## КЛЮЧЕВЫЕ НАХОДКИ — как извлекается playlist
 
-**Cinemar embed HTML содержит весь playlist в одном `"file":"#2..."` поле**: для сериала 5 сезонов × 8 серий × десятки озвучек, для фильма — плоский массив озвучек. Поле обфусцировано (custom base64 + pepper rotation), и **regex-based декодеры (ProjectBinge / pulse) теряют ~50% данных** из-за неточной деобфускации.
-
-**Решение**: не декодировать самим. В Playwright перед загрузкой страницы инжектируется init script, который **перехватывает `JSON.parse`** — playerjs сам декодирует поле и парсит JSON, мы ловим результат:
+### kinogo (cinemar) — JSON.parse hook
+**Cinemar embed HTML содержит весь playlist в одном `"file":"#2..."` поле**: обфусцировано (custom base64 + pepper rotation), regex-based декодеры теряют ~50%. Решение: в Playwright инжектируется init script, который **перехватывает `JSON.parse`** — playerjs сам декодирует поле и парсит JSON, мы ловим результат:
 
 ```js
-const caps = [];
-const orig = JSON.parse;
-JSON.parse = function(s, reviver) {
-  const r = orig.call(this, s, reviver);
-  // сериал: r[0].folder, фильм: r[0].file
-  if (Array.isArray(r) && r.length > 0 && r[0] && (r[0].folder || r[0].file)) {
-    caps.push(r);
+JSON.parse = function(s, r) {
+  const result = orig(s, r);
+  if (Array.isArray(result) && result.length > 0 && result[0] && (result[0].folder || result[0].file)) {
+    caps.push(result);
   }
-  return r;
+  return result;
 };
-Object.defineProperty(window, '__capturedPlaylists', { get: () => caps });
 ```
 
-После `iframe load + 5s` → `frame.evaluate(() => window.__capturedPlaylists)` → массив playlists. `structureFromCaptured()` выбирает best по score (число `.file` полей), детектит Variant A vs Variant B и нормализует.
+Сериал: `[{folder: [...], ...}]`. Фильм: `[{title, file}, ...]`.
+
+### lordfilm (player-venom) — HTTP response intercept
+player-venom UMD использует `Object.defineProperty(window, 'VenomPlayer', {value, writable:true, configurable:true})` что **переопределяет** наши accessor-property hooks (verified: window.VenomPlayer не triggered наш setter после venom-загрузки). Поэтому JS-runtime подход не работает.
+
+Решение: `page.on('response')` ловит HTTP-ответ от `https://api.femd.ws/embed/movie/<id>` (тот HTML что инжектится в iframe srcdoc). В нём инлайн `makePlayer({playlist: {seasons:[{...}]}})`. Парсим `seasons:` массив через bracket-balance scanner (`extractVenomSeasons`) → `JSON.parse` → нормализуем в `PlayerStructure` где каждая `audio.names[i]` становится отдельной voice с тем же `file` и разным `audioTrack` индексом.
 
 ## Subpath deployment (`PUBLIC_BASE_PATH`)
 
