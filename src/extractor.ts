@@ -576,13 +576,126 @@ export function detectSource(url: string): 'kinogo' | 'lordfilm' | 'theboys' | n
   return null;
 }
 
+// theboys.fun блокирует datacenter IP, поэтому Playwright-extract не работает с VPS.
+// Вместо этого читаем pre-crawl'ed JSON-кеш (scripts/crawl-theboys.mjs запускается локально
+// с residential IP). voiceFile хранится как маркер 'kalarona-resolve:<video_id>' — сервер
+// при /hls/.../index.m3u8 fetch'ит свежий m3u8 URL у kalarona.org/player/responce.php.
+interface TheboysCacheVoice {
+  voice_id: number;
+  voice_name: string;
+  video_id: number;
+  duration?: number;
+}
+interface TheboysCacheEpisode {
+  episode: number;
+  voices: TheboysCacheVoice[];
+}
+interface TheboysCacheSeason {
+  season: number;
+  episodes: TheboysCacheEpisode[];
+}
+interface TheboysCache {
+  source: string;
+  slug: string;
+  playlist_id: number;
+  extracted_at: string;
+  seasons: TheboysCacheSeason[];
+}
+
+const theboysCacheMem = new Map<string, TheboysCache>();
+async function loadTheboysCache(slug: string): Promise<TheboysCache | null> {
+  const cached = theboysCacheMem.get(slug);
+  if (cached) return cached;
+  try {
+    const { readFile } = await import('node:fs/promises');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const here = dirname(fileURLToPath(import.meta.url));
+    // dist/extractor.js → ../../data/, src/extractor.ts → ../data/
+    const candidates = [
+      join(here, '..', '..', 'data', `theboys-${slug}.json`),
+      join(here, '..', 'data', `theboys-${slug}.json`),
+    ];
+    for (const p of candidates) {
+      try {
+        const raw = await readFile(p, 'utf-8');
+        const data = JSON.parse(raw) as TheboysCache;
+        theboysCacheMem.set(slug, data);
+        return data;
+      } catch {
+        /* try next */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function parseTheboysUrl(pageUrl: string): { slug: string; season?: number; episode?: number } | null {
+  try {
+    const u = new URL(pageUrl);
+    if (!/theboys\.fun$/i.test(u.hostname)) return null;
+    // Patterns: /pacany-{S}-sezon-{E}-seriya/, /pacany-{S}-sezon/, /pacany/
+    const path = u.pathname.replace(/\/$/, '');
+    let m = path.match(/^\/([\w-]+?)-(\d+)-sezon-(\d+)-seriya$/i);
+    if (m && m[1] && m[2] && m[3]) return { slug: m[1].toLowerCase(), season: Number(m[2]), episode: Number(m[3]) };
+    m = path.match(/^\/([\w-]+?)-(\d+)-sezon$/i);
+    if (m && m[1] && m[2]) return { slug: m[1].toLowerCase(), season: Number(m[2]) };
+    m = path.match(/^\/([\w-]+)$/);
+    if (m && m[1]) return { slug: m[1].toLowerCase() };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function captureFromTheboys(pageUrl: string): Promise<{
+  playlist: PlayerStructure;
+  cookies: ExtractResult['cookies'];
+}> {
+  const parsed = parseTheboysUrl(pageUrl);
+  if (!parsed) throw new ExtractorError(`не парсится theboys URL: ${pageUrl}`, 'playlist');
+  const cache = await loadTheboysCache(parsed.slug);
+  if (!cache) {
+    throw new ExtractorError(
+      `нет cache для theboys/${parsed.slug} — запусти scripts/crawl-theboys.mjs локально`,
+      'playlist',
+    );
+  }
+  const seasons: SeasonInfo[] = [];
+  for (const s of cache.seasons) {
+    const sId = String(s.season);
+    const sTitle = `Сезон ${s.season}`;
+    const episodes: EpisodeInfo[] = [];
+    for (const e of s.episodes) {
+      const eId = String(e.episode);
+      const eTitle = `Серия ${e.episode}`;
+      const voices: VoiceInfo[] = [];
+      for (const v of e.voices) {
+        if (!v.video_id) continue;
+        voices.push({
+          voice_id: v.voice_id,
+          title: v.voice_name,
+          file: `kalarona-resolve:${v.video_id}`,
+        });
+      }
+      if (voices.length) episodes.push({ id: eId, title: eTitle, voices });
+    }
+    if (episodes.length) seasons.push({ id: sId, title: sTitle, episodes });
+  }
+  dbg(
+    `theboys/${parsed.slug}: cache loaded, ${seasons.length} seasons, ${seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`,
+  );
+  return { playlist: { seasons }, cookies: [] };
+}
+
 export async function extractM3U8(
   pageUrl: string,
   opts: SelectionOpts & { timeoutMs?: number } = {},
 ): Promise<ExtractResult> {
   const source = detectSource(pageUrl);
   if (!source) throw new ExtractorError('unsupported source url', 'playlist');
-  const capture = source === 'lordfilm' ? captureFromLordfilm : captureFromKinogo;
   const referer =
     source === 'lordfilm'
       ? 'https://api.femd.ws/'
@@ -590,13 +703,32 @@ export async function extractM3U8(
         ? 'https://www.theboys.fun/'
         : 'https://cinemar.cc/';
 
-  const { playlist, cookies } = await capture(pageUrl, opts.timeoutMs ?? 45_000);
+  // theboys.fun обходится без Playwright — читаем pre-crawl JSON cache.
+  // Также если URL theboys содержит season/episode, используем их как defaults.
+  let effectiveOpts = opts;
+  let captureResult;
+  if (source === 'theboys') {
+    captureResult = await captureFromTheboys(pageUrl);
+    const parsed = parseTheboysUrl(pageUrl);
+    if (parsed) {
+      effectiveOpts = {
+        season: opts.season ?? (parsed.season !== undefined ? String(parsed.season) : undefined),
+        episode: opts.episode ?? (parsed.episode !== undefined ? String(parsed.episode) : undefined),
+        voice: opts.voice,
+        timeoutMs: opts.timeoutMs,
+      };
+    }
+  } else {
+    const capture = source === 'lordfilm' ? captureFromLordfilm : captureFromKinogo;
+    captureResult = await capture(pageUrl, opts.timeoutMs ?? 45_000);
+  }
+  const { playlist, cookies } = captureResult;
 
-  const season = matchSeason(playlist, opts.season);
+  const season = matchSeason(playlist, effectiveOpts.season);
   if (!season) throw new ExtractorError('no seasons in playlist', 'select');
-  const episode = matchEpisode(season, opts.episode);
+  const episode = matchEpisode(season, effectiveOpts.episode);
   if (!episode) throw new ExtractorError(`season ${season.title}: no episodes`, 'select');
-  const voice = matchVoice(episode, opts.voice);
+  const voice = matchVoice(episode, effectiveOpts.voice);
   if (!voice) throw new ExtractorError(`${season.title}/${episode.title}: no voices`, 'select');
 
   dbg(`selected ${season.title} / ${episode.title} / ${voice.title} (source=${source})`);

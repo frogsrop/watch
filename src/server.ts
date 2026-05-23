@@ -164,9 +164,15 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
   async (req, reply) => {
     const url = String(req.body?.url ?? '').trim();
     if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm|theboys.fun)' });
-    const season = req.body?.season?.trim() || undefined;
-    const episode = req.body?.episode?.trim() || undefined;
+    let season = req.body?.season?.trim() || undefined;
+    let episode = req.body?.episode?.trim() || undefined;
     const voice = req.body?.voice?.trim() || undefined;
+    // theboys URL содержит season/episode — используем как default если в body не задано
+    const tb = url.match(/theboys\.fun\/[\w-]+?-(\d+)-sezon-(\d+)-seriya/i);
+    if (tb) {
+      season = season ?? tb[1];
+      episode = episode ?? tb[2];
+    }
     try {
       gcProbeCache();
       let entry = probeCache.get(url);
@@ -265,22 +271,50 @@ fastify.get<{ Params: { roomId: string; idx: string } }>(
   },
 );
 
+/**
+ * theboys.fun хранит voiceFile как маркер 'kalarona-resolve:<video_id>'.
+ * Резолвим в живой подписанный m3u8 URL через kalarona.org/player/responce.php.
+ * Не кешируем (URL'ы подписаны временной меткой ~3 часа — каждый раз свежий).
+ */
+async function resolveKalaronaVoice(voiceFile: string, session: { userAgent: string }): Promise<string | null> {
+  const m = voiceFile.match(/^kalarona-resolve:(\d+)$/);
+  if (!m) return null;
+  const videoId = m[1];
+  try {
+    const resp = await fetchUpstream(`https://kalarona.org/player/responce.php?video_id=${videoId}`, {
+      referer: 'https://www.theboys.fun/',
+      userAgent: session.userAgent,
+      cookies: [],
+    });
+    if (resp.statusCode !== 200) {
+      fastify.log.warn({ statusCode: resp.statusCode, videoId }, 'kalarona resolve non-200');
+      return null;
+    }
+    const json = JSON.parse(await resp.body.text()) as { src?: string };
+    return json.src || null;
+  } catch (e) {
+    fastify.log.error({ err: e, videoId }, 'kalarona resolve failed');
+    return null;
+  }
+}
+
 fastify.get<{ Params: { roomId: string } }>(`${BASE_PATH}/hls/:roomId/index.m3u8`, async (req, reply) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return reply.code(404).send('room not found');
   try {
-    const upstream = await fetchUpstream(room.current.voiceFile, room.session);
+    // Резолвим kalarona-resolve:N в живой m3u8 URL
+    let voiceFile = room.current.voiceFile;
+    if (voiceFile.startsWith('kalarona-resolve:')) {
+      const resolved = await resolveKalaronaVoice(voiceFile, room.session);
+      if (!resolved) return reply.code(502).send('kalarona resolve failed');
+      voiceFile = resolved;
+    }
+    const upstream = await fetchUpstream(voiceFile, room.session);
     if (upstream.statusCode !== 200) {
       return reply.code(502).send(`upstream ${upstream.statusCode}`);
     }
     const body = await upstream.body.text();
-    const rewritten = rewriteManifest(
-      body,
-      room.current.voiceFile,
-      room.id,
-      PROXY_SECRET,
-      PUBLIC_BASE_URL,
-    );
+    const rewritten = rewriteManifest(body, voiceFile, room.id, PROXY_SECRET, PUBLIC_BASE_URL);
     return reply
       .type('application/vnd.apple.mpegurl')
       .header('cache-control', 'no-store')
