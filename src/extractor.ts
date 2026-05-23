@@ -569,11 +569,107 @@ function matchVoice(episode: EpisodeInfo, selector?: string): VoiceInfo | null {
   return episode.voices[0] ?? null;
 }
 
-export function detectSource(url: string): 'kinogo' | 'lordfilm' | 'theboys' | null {
+export function detectSource(url: string): 'kinogo' | 'lordfilm' | 'theboys' | 'kinomix' | null {
   if (/lordfilm/i.test(url)) return 'lordfilm';
   if (/kinogo/i.test(url)) return 'kinogo';
   if (/theboys\.fun/i.test(url)) return 'theboys';
+  if (/kinomix\.web\.app/i.test(url)) return 'kinomix';
   return null;
+}
+
+// kinomix.web.app использует api.kinobox.tv в качестве плеер-агрегатора, среди
+// прочего отдаёт Collaps (player-venom на api.ortified.ws) — тот же что в lordfilm.
+// api.kinobox.tv блокирует datacenter IPs через TLS-фингерпринт, но api.ortified.ws
+// доступен с VPS обычным undici-fetch'ом. Маппинг (kinopoisk_id → ortified_id)
+// собирается локально через scripts/crawl-kinomix.mjs в data/kinomix-cache.json.
+interface KinomixCacheEntry {
+  kinopoisk_id: number;
+  ortified_id: number;
+  title?: string | null;
+}
+interface KinomixCache {
+  source: string;
+  entries: Record<string, KinomixCacheEntry>;
+}
+
+const kinomixCacheMem = new Map<string, KinomixCacheEntry>();
+let kinomixCacheLoaded = false;
+async function loadKinomixCache(): Promise<void> {
+  if (kinomixCacheLoaded) return;
+  try {
+    const { readFile } = await import('node:fs/promises');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+    const here = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      join(here, '..', '..', 'data', 'kinomix-cache.json'),
+      join(here, '..', 'data', 'kinomix-cache.json'),
+    ];
+    for (const p of candidates) {
+      try {
+        const raw = await readFile(p, 'utf-8');
+        const data = JSON.parse(raw) as KinomixCache;
+        for (const [k, v] of Object.entries(data.entries ?? {})) kinomixCacheMem.set(k, v);
+        break;
+      } catch {
+        /* try next */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  kinomixCacheLoaded = true;
+}
+
+function parseKinomixUrl(pageUrl: string): { kinopoisk_id: number } | null {
+  try {
+    const u = new URL(pageUrl);
+    if (!/kinomix\.web\.app$/i.test(u.hostname)) return null;
+    const m = u.pathname.match(/^\/(?:movie|tv)\/(\d+)/i);
+    if (!m || !m[1]) return null;
+    return { kinopoisk_id: Number(m[1]) };
+  } catch {
+    return null;
+  }
+}
+
+async function captureFromKinomix(pageUrl: string): Promise<{
+  playlist: PlayerStructure;
+  cookies: ExtractResult['cookies'];
+}> {
+  const parsed = parseKinomixUrl(pageUrl);
+  if (!parsed) throw new ExtractorError(`не парсится kinomix URL: ${pageUrl}`, 'playlist');
+  await loadKinomixCache();
+  const entry = kinomixCacheMem.get(String(parsed.kinopoisk_id));
+  if (!entry) {
+    throw new ExtractorError(
+      `kinopoisk_id=${parsed.kinopoisk_id} нет в кеше — запусти scripts/crawl-kinomix.mjs ${parsed.kinopoisk_id} локально`,
+      'playlist',
+    );
+  }
+  // Прямой HTTP fetch к api.ortified.ws (тот же venom-формат что в lordfilm).
+  const embedUrl = `https://api.ortified.ws/embed/movie/${entry.ortified_id}`;
+  dbg(`kinomix: ${parsed.kinopoisk_id} → ortified ${entry.ortified_id}, fetching ${embedUrl}`);
+  const { request } = await import('undici');
+  const res = await request(embedUrl, {
+    headers: {
+      'user-agent': UA,
+      referer: 'https://kinomix.web.app/',
+    },
+  });
+  if (res.statusCode !== 200) {
+    throw new ExtractorError(`ortified embed HTTP ${res.statusCode}`, 'playlist');
+  }
+  const body = await res.body.text();
+  const seasons = extractVenomSeasons(body);
+  if (!seasons || seasons.length === 0) {
+    throw new ExtractorError('ortified body: venom seasons не извлеклись', 'playlist');
+  }
+  const playlist = structureFromVenom([{ playlist: { seasons } }]);
+  if (playlist.seasons.length === 0) {
+    throw new ExtractorError('venom seasons after normalization пусто', 'playlist');
+  }
+  return { playlist, cookies: [] };
 }
 
 // theboys.fun блокирует datacenter IP, поэтому Playwright-extract не работает с VPS.
@@ -701,10 +797,11 @@ export async function extractM3U8(
       ? 'https://api.femd.ws/'
       : source === 'theboys'
         ? 'https://www.theboys.fun/'
-        : 'https://cinemar.cc/';
+        : source === 'kinomix'
+          ? 'https://kinomix.web.app/'
+          : 'https://cinemar.cc/';
 
-  // theboys.fun обходится без Playwright — читаем pre-crawl JSON cache.
-  // Также если URL theboys содержит season/episode, используем их как defaults.
+  // theboys.fun и kinomix.web.app обходятся без Playwright — читаем pre-crawl JSON cache.
   let effectiveOpts = opts;
   let captureResult;
   if (source === 'theboys') {
@@ -718,6 +815,8 @@ export async function extractM3U8(
         timeoutMs: opts.timeoutMs,
       };
     }
+  } else if (source === 'kinomix') {
+    captureResult = await captureFromKinomix(pageUrl);
   } else {
     const capture = source === 'lordfilm' ? captureFromLordfilm : captureFromKinogo;
     captureResult = await capture(pageUrl, opts.timeoutMs ?? 45_000);
