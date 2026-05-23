@@ -30,7 +30,8 @@ Self-hosted Ubuntu 22.04+ VPS (минимум 2 GB RAM / 1 vCPU + Node 22+, Goog
 ### Видеоконтент
 - **kinogo сериал** (Variant A): JSON.parse-hook ловит `[{folder: [episodes], ...}]` → seasons / episodes / voices (каждая озвучка — свой m3u8).
 - **kinogo фильм** (Variant B): JSON.parse-hook ловит плоский `[{title, file}, ...]` → оборачивается в один сезон `id: 'film'` / один эпизод `id: 'film'` / N озвучек. UI определяет фильм через `isMovie()` (id == 'film').
-- **lordfilm** (Variant C, venom): `page.on('response')` ловит ответ `api.femd.ws/embed/movie/<id>` → `extractVenomSeasons()` парсит инлайн JS `seasons:[...]`. Каждый эпизод имеет ОДИН master.m3u8 + многоязычные audio tracks (LostFilm, AlexFilm, Кубик в кубе, и пр.). На клиенте: `hls.audioTrack = current.audioTrack` после `MANIFEST_PARSED` без destroy/recreate hls.
+- **lordfilm** (Variant C, venom): `page.on('response')` ловит ответ `api.femd.ws/embed/movie/<id>` → `extractVenomSeasons()` парсит инлайн JS `seasons:[...]`. Каждый эпизод имеет ОДИН master.m3u8 + многоязычные audio tracks (LostFilm, AlexFilm, Кубик в кубе, и пр.) + VTT субтитры (Eng full/SDH, Рус, Укр). На клиенте: `hls.audioTrack = current.audioTrack` после `MANIFEST_PARSED` без destroy/recreate hls.
+- **Субтитры** (только venom/lordfilm — у cinemar нет): `EpisodeInfo.subtitles?[]` хранит сырые VTT-URL. Server endpoint `/hls/:roomId/sub/:idx` проксирует через interkh.com whitelist с `text/vtt` content-type. Client `applySubtitleTracks()` после loadSource создаёт `<track kind="subtitles">` элементы — нативные controls (для лидера) и `.gc-cc` button (для гостя) автоматически показывают переключатель.
 - Все сезоны × серии × до 16+ озвучек работают. Качество 240p–1080p — adaptive bitrate hls.js.
 
 ## Архитектура

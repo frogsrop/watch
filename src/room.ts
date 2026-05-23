@@ -18,6 +18,11 @@ export interface RoomCurrent {
   voiceFile: string;
   /** Для venom-стримов (lordfilm): индекс audio track'а внутри master.m3u8. */
   audioTrack?: number;
+  /**
+   * Сырые URL'ы VTT субтитров эпизода (хранятся на upstream-CDN).
+   * Клиент тянет через /hls/:roomId/sub/:idx — там server проксирует.
+   */
+  subtitles?: { url: string; name: string; lang?: string }[];
 }
 
 interface Member {

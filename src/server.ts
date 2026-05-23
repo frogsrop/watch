@@ -119,6 +119,7 @@ function findInStructure(
   episodeId: string;
   episodeTitle: string;
   audioTrack?: number;
+  subtitles?: { url: string; name: string; lang?: string }[];
 } | null {
   const matchByNum = (text: string | undefined, candidates: { id: string; title: string }[]) => {
     if (!text) return candidates[0];
@@ -154,6 +155,7 @@ function findInStructure(
     episodeId: ep_.id,
     episodeTitle: ep_.title,
     audioTrack: voiceObj.audioTrack,
+    subtitles: ep_.subtitles,
   };
 }
 
@@ -196,6 +198,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
           voiceTitle: found.voiceTitle,
           voiceFile: found.m3u8,
           audioTrack: found.audioTrack,
+          subtitles: found.subtitles,
         },
       });
       return reply.send({
@@ -232,9 +235,35 @@ fastify.post<{
     voiceTitle: found.voiceTitle,
     voiceFile: found.m3u8,
     audioTrack: found.audioTrack,
+    subtitles: found.subtitles,
   });
   return reply.send({ current: room.current, sourceVersion: room.sourceVersion });
 });
+
+fastify.get<{ Params: { roomId: string; idx: string } }>(
+  `${BASE_PATH}/hls/:roomId/sub/:idx`,
+  async (req, reply) => {
+    const room = rooms.get(req.params.roomId);
+    if (!room) return reply.code(404).send('room not found');
+    const idx = parseInt(req.params.idx, 10);
+    if (!Number.isFinite(idx) || idx < 0) return reply.code(400).send('bad idx');
+    const sub = room.current.subtitles?.[idx];
+    if (!sub) return reply.code(404).send('subtitle not found');
+    if (!isAllowedHost(sub.url)) return reply.code(403).send('forbidden host');
+    try {
+      const upstream = await fetchUpstream(sub.url, room.session);
+      return reply
+        .code(upstream.statusCode)
+        .type('text/vtt; charset=utf-8')
+        .header('cache-control', upstream.statusCode === 200 ? 'public, max-age=3600' : 'no-store')
+        .header('access-control-allow-origin', '*')
+        .send(upstream.body);
+    } catch (e) {
+      req.log.error({ err: e, idx }, 'subtitle fetch failed');
+      return reply.code(502).send('upstream error');
+    }
+  },
+);
 
 fastify.get<{ Params: { roomId: string } }>(`${BASE_PATH}/hls/:roomId/index.m3u8`, async (req, reply) => {
   const room = rooms.get(req.params.roomId);

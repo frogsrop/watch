@@ -9,10 +9,17 @@ export interface VoiceInfo {
   audioTrack?: number;
 }
 
+export interface SubtitleInfo {
+  url: string;
+  name: string;
+  lang?: string;
+}
+
 export interface EpisodeInfo {
   id: string;
   title: string;
   voices: VoiceInfo[];
+  subtitles?: SubtitleInfo[];
 }
 
 export interface SeasonInfo {
@@ -323,6 +330,7 @@ interface VenomEpisode {
   episode?: string | number;
   hls?: string;
   audio?: { names?: string[]; order?: number[] };
+  cc?: { url?: string; name?: string }[];
 }
 
 interface VenomSeason {
@@ -377,7 +385,16 @@ function structureFromVenom(configs: VenomConfig[]): PlayerStructure {
       } else {
         voices.push({ title: 'По умолчанию', file: String(e.hls), audioTrack: 0 });
       }
-      episodes.push({ id: eId, title: eTitle, voices });
+      const subtitles: SubtitleInfo[] = [];
+      for (const cc of e.cc ?? []) {
+        if (!cc?.url) continue;
+        subtitles.push({
+          url: String(cc.url),
+          name: cleanTitle(cc.name) || 'Субтитры',
+          lang: /рус|rus/i.test(cc.name ?? '') ? 'ru' : undefined,
+        });
+      }
+      episodes.push({ id: eId, title: eTitle, voices, subtitles: subtitles.length ? subtitles : undefined });
     }
     if (episodes.length) seasons.push({ id: sId, title: sTitle, episodes });
   }

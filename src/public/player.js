@@ -65,6 +65,27 @@
     }
   }
 
+  function applySubtitleTracks() {
+    // Remove old <track> elements
+    for (const t of [...video.querySelectorAll('track')]) t.remove();
+    const subs = current?.subtitles || [];
+    for (let i = 0; i < subs.length; i++) {
+      const s = subs[i];
+      const t = document.createElement('track');
+      t.kind = 'subtitles';
+      t.src = `${BASE}/hls/${roomId}/sub/${i}`;
+      t.label = s.name || `Субтитры ${i + 1}`;
+      if (s.lang) t.srclang = s.lang;
+      video.appendChild(t);
+    }
+    // Default to disabled — user сам включает через CC button или native menu
+    queueMicrotask(() => {
+      const tracks = video.textTracks;
+      for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
+      updateCaptionsAvailability();
+    });
+  }
+
   function loadSource(url) {
     if (hls) {
       try { hls.destroy(); } catch {}
@@ -354,6 +375,7 @@
       video.pause();
       video.currentTime = 0;
       loadSource(manifestUrl());
+      applySubtitleTracks();
       queueMicrotask(() => (suppress = false));
     }
     toast(
@@ -385,6 +407,7 @@
           updateRoleBadge();
           updateCurrentBadge();
           loadSource(manifestUrl());
+          applySubtitleTracks();
           applySnapshot(msg.snapshot);
           break;
         case 'member-join':
