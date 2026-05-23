@@ -15,6 +15,7 @@
   const pickerHint = document.getElementById('picker-hint');
   const selSeason = document.getElementById('sel-season');
   const selEpisode = document.getElementById('sel-episode');
+  const selProvider = document.getElementById('sel-provider');
   const selVoice = document.getElementById('sel-voice');
   const guestControls = document.getElementById('guest-controls');
   const gcMute = document.getElementById('gc-mute');
@@ -24,6 +25,7 @@
   const gcFs = document.getElementById('gc-fs');
   const rowSeason = document.getElementById('row-season');
   const rowEpisode = document.getElementById('row-episode');
+  const rowProvider = document.getElementById('row-provider');
 
   let selfId = null;
   let leaderId = null;
@@ -238,9 +240,12 @@
 
   function updateCurrentBadge() {
     if (!current) return;
+    const voice = current.provider
+      ? `${current.voiceTitle} · ${current.provider}`
+      : current.voiceTitle;
     currentEl.textContent = isMovie()
-      ? current.voiceTitle
-      : `${current.seasonTitle} · ${current.episodeTitle} · ${current.voiceTitle}`;
+      ? voice
+      : `${current.seasonTitle} · ${current.episodeTitle} · ${voice}`;
   }
 
   function fillSel(sel, items, currentLabel) {
@@ -254,6 +259,18 @@
     }
   }
 
+  function distinctProviders(voices) {
+    const seen = new Set();
+    const out = [];
+    for (const v of voices ?? []) {
+      const p = v.provider;
+      if (!p || seen.has(p)) continue;
+      seen.add(p);
+      out.push(p);
+    }
+    return out;
+  }
+
   function renderPickerCascade() {
     if (!playlist || !current) return;
     const wantS = selSeason.value || current.seasonTitle;
@@ -262,17 +279,46 @@
     const wantE = selEpisode.value || current.episodeTitle;
     fillSel(selEpisode, season?.episodes ?? [], wantE);
     const ep = season?.episodes.find((e) => e.title === selEpisode.value) ?? season?.episodes[0];
+    const allVoices = ep?.voices ?? [];
+    // Если в эпизоде есть провайдеры (kinomix-агрегатор) — показываем row "Плеер"
+    // и фильтруем голоса. Иначе row скрыт и показываем все голоса как раньше.
+    const providers = distinctProviders(allVoices);
+    const hasProvider = providers.length > 0;
+    rowProvider.hidden = !hasProvider;
+    let voiceList = allVoices;
+    if (hasProvider) {
+      // Если selProvider пустой или его нет в текущем списке провайдеров,
+      // используем current.provider или первый из списка.
+      const currentP = current?.provider;
+      const wantP = (selProvider.value && providers.includes(selProvider.value))
+        ? selProvider.value
+        : (currentP && providers.includes(currentP) ? currentP : providers[0]);
+      fillSelOpts(selProvider, providers.map((p) => ({ value: p, label: p })), wantP);
+      voiceList = allVoices.filter((v) => v.provider === wantP);
+    }
     const wantV = selVoice.value || current.voiceTitle;
-    fillSel(selVoice, ep?.voices ?? [], wantV);
+    fillSel(selVoice, voiceList, wantV);
+  }
+
+  function fillSelOpts(sel, opts, currentValue) {
+    sel.innerHTML = '';
+    for (const o of opts) {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label;
+      if (o.value === currentValue) opt.selected = true;
+      sel.appendChild(opt);
+    }
   }
 
   function openPicker() {
     if (!playlist) return;
     pickerHint.hidden = isLeader();
     pickerApply.disabled = !isLeader();
-    selSeason.disabled = selEpisode.disabled = selVoice.disabled = !isLeader();
+    selSeason.disabled = selEpisode.disabled = selProvider.disabled = selVoice.disabled = !isLeader();
     selSeason.value = current.seasonTitle;
     selEpisode.value = current.episodeTitle;
+    selProvider.value = current.provider || '';
     selVoice.value = current.voiceTitle;
     rowSeason.hidden = isMovie();
     rowEpisode.hidden = isMovie();
@@ -284,10 +330,16 @@
   pickerCancel.addEventListener('click', () => (pickerEl.hidden = true));
   selSeason.addEventListener('change', () => {
     selEpisode.value = '';
+    selProvider.value = '';
     selVoice.value = '';
     renderPickerCascade();
   });
   selEpisode.addEventListener('change', () => {
+    selProvider.value = '';
+    selVoice.value = '';
+    renderPickerCascade();
+  });
+  selProvider.addEventListener('change', () => {
     selVoice.value = '';
     renderPickerCascade();
   });
@@ -303,6 +355,7 @@
           season: selSeason.value,
           episode: selEpisode.value,
           voice: selVoice.value,
+          provider: rowProvider.hidden ? undefined : selProvider.value,
         }),
       });
       if (!res.ok) {

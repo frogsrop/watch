@@ -7,7 +7,7 @@ export interface SessionHeaders {
   cookies: { name: string; value: string; domain: string }[];
 }
 
-const ALLOWED_HOSTS_RE = /(^|\.)(cinemap\.cc|cinemar\.cc|aniqit\.com|kinogo\.ec|interkh\.com|femd\.ws|kalarona\.org|werberk\.pro|ortified\.ws|rtbcdn\.cloud)$/i;
+const ALLOWED_HOSTS_RE = /(^|\.)(cinemap\.cc|cinemar\.cc|aniqit\.com|kinogo\.ec|interkh\.com|femd\.ws|kalarona\.org|werberk\.pro|ortified\.ws|rtbcdn\.cloud|kinohd\.co|factorios\.live|videoseedcdn\.com|videoseed\.tv|tv-1-kinoserial\.net|kinescopecdn\.net)$/i;
 
 export function isAllowedHost(url: string): boolean {
   try {

@@ -10,6 +10,7 @@ import {
   extractM3U8,
   closeBrowser,
   ExtractorError,
+  resolveFlixcdnVoice,
   type PlayerStructure,
   type ExtractResult,
 } from './extractor.js';
@@ -111,6 +112,7 @@ function findInStructure(
   season?: string,
   episode?: string,
   voice?: string,
+  provider?: string,
 ): {
   m3u8: string;
   voiceTitle: string;
@@ -119,6 +121,7 @@ function findInStructure(
   episodeId: string;
   episodeTitle: string;
   audioTrack?: number;
+  provider?: string;
   subtitles?: { url: string; name: string; lang?: string }[];
 } | null {
   const matchByNum = (text: string | undefined, candidates: { id: string; title: string }[]) => {
@@ -137,14 +140,20 @@ function findInStructure(
   const epMatch = matchByNum(episode, season_.episodes);
   const ep_ = season_.episodes.find((e) => e.id === epMatch?.id) ?? season_.episodes[0];
   if (!ep_) return null;
-  let voiceObj = ep_.voices[0];
-  if (voice && ep_.voices.length) {
+  // Сначала фильтруем по провайдеру (если задан); fallback на полный пул.
+  const providerLow = provider?.trim().toLowerCase();
+  const filtered = providerLow
+    ? ep_.voices.filter((v) => (v.provider ?? '').toLowerCase() === providerLow)
+    : ep_.voices;
+  const pool = filtered.length > 0 ? filtered : ep_.voices;
+  let voiceObj = pool[0];
+  if (voice && pool.length) {
     const tLow = voice.trim().toLowerCase();
     voiceObj =
-      ep_.voices.find((v) => v.title === voice) ??
-      ep_.voices.find((v) => v.title.toLowerCase() === tLow) ??
-      ep_.voices.find((v) => v.title.toLowerCase().startsWith(tLow)) ??
-      ep_.voices[0];
+      pool.find((v) => v.title === voice) ??
+      pool.find((v) => v.title.toLowerCase() === tLow) ??
+      pool.find((v) => v.title.toLowerCase().startsWith(tLow)) ??
+      pool[0];
   }
   if (!voiceObj) return null;
   return {
@@ -155,11 +164,12 @@ function findInStructure(
     episodeId: ep_.id,
     episodeTitle: ep_.title,
     audioTrack: voiceObj.audioTrack,
+    provider: voiceObj.provider,
     subtitles: ep_.subtitles,
   };
 }
 
-fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: string } }>(
+fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: string; provider?: string } }>(
   `${BASE_PATH}/api/extract`,
   async (req, reply) => {
     const url = String(req.body?.url ?? '').trim();
@@ -167,6 +177,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
     let season = req.body?.season?.trim() || undefined;
     let episode = req.body?.episode?.trim() || undefined;
     const voice = req.body?.voice?.trim() || undefined;
+    const provider = req.body?.provider?.trim() || undefined;
     // theboys URL содержит season/episode — используем как default если в body не задано
     const tb = url.match(/theboys\.fun\/[\w-]+?-(\d+)-sezon-(\d+)-seriya/i);
     if (tb) {
@@ -188,7 +199,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
         };
         probeCache.set(url, entry);
       }
-      const found = findInStructure(entry.structure, season, episode, voice);
+      const found = findInStructure(entry.structure, season, episode, voice, provider);
       if (!found) {
         return reply.code(400).send({ error: 'no matching combination' });
       }
@@ -204,6 +215,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
           voiceTitle: found.voiceTitle,
           voiceFile: found.m3u8,
           audioTrack: found.audioTrack,
+          provider: found.provider,
           subtitles: found.subtitles,
         },
       });
@@ -222,7 +234,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
 
 fastify.post<{
   Params: { roomId: string };
-  Body: { season?: string; episode?: string; voice?: string };
+  Body: { season?: string; episode?: string; voice?: string; provider?: string };
 }>(`${BASE_PATH}/api/room/:roomId/switch`, async (req, reply) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return reply.code(404).send({ error: 'room not found' });
@@ -231,6 +243,7 @@ fastify.post<{
     req.body?.season?.trim() || undefined,
     req.body?.episode?.trim() || undefined,
     req.body?.voice?.trim() || undefined,
+    req.body?.provider?.trim() || undefined,
   );
   if (!found) return reply.code(400).send({ error: 'no matching combination' });
   rooms.switchSource(room.id, null, {
@@ -241,6 +254,7 @@ fastify.post<{
     voiceTitle: found.voiceTitle,
     voiceFile: found.m3u8,
     audioTrack: found.audioTrack,
+    provider: found.provider,
     subtitles: found.subtitles,
   });
   return reply.send({ current: room.current, sourceVersion: room.sourceVersion });
@@ -270,6 +284,25 @@ fastify.get<{ Params: { roomId: string; idx: string } }>(
     }
   },
 );
+
+/**
+ * Кеш для Flixcdn-резолвов: m3u8 URL'ы подписаны бакетом `:YYYYMMDDHH`
+ * (~1 час валидности). Кешируем по ключу (show|trans|s|e) на 30 минут чтобы
+ * не дёргать Playwright на каждый /hls/.../index.m3u8.
+ */
+const flixcdnResolveCache = new Map<string, { url: string; at: number }>();
+const FLIXCDN_RESOLVE_TTL_MS = 30 * 60 * 1000;
+
+async function resolveFlixcdn(voiceFile: string): Promise<string | null> {
+  const key = voiceFile;
+  const now = Date.now();
+  const hit = flixcdnResolveCache.get(key);
+  if (hit && now - hit.at < FLIXCDN_RESOLVE_TTL_MS) return hit.url;
+  const resolved = await resolveFlixcdnVoice(voiceFile);
+  if (!resolved) return null;
+  flixcdnResolveCache.set(key, { url: resolved, at: now });
+  return resolved;
+}
 
 /**
  * theboys.fun хранит voiceFile как маркер 'kalarona-resolve:<video_id>'.
@@ -302,11 +335,15 @@ fastify.get<{ Params: { roomId: string } }>(`${BASE_PATH}/hls/:roomId/index.m3u8
   const room = rooms.get(req.params.roomId);
   if (!room) return reply.code(404).send('room not found');
   try {
-    // Резолвим kalarona-resolve:N в живой m3u8 URL
+    // Резолвим late-binding маркеры (kalarona/flixcdn) в живой m3u8 URL
     let voiceFile = room.current.voiceFile;
     if (voiceFile.startsWith('kalarona-resolve:')) {
       const resolved = await resolveKalaronaVoice(voiceFile, room.session);
       if (!resolved) return reply.code(502).send('kalarona resolve failed');
+      voiceFile = resolved;
+    } else if (voiceFile.startsWith('flixcdn-resolve:')) {
+      const resolved = await resolveFlixcdn(voiceFile);
+      if (!resolved) return reply.code(502).send('flixcdn resolve failed');
       voiceFile = resolved;
     }
     const upstream = await fetchUpstream(voiceFile, room.session);

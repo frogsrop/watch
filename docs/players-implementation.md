@@ -1,27 +1,36 @@
 # Implementing remaining kinomix.web.app providers
 
-Этот документ — самодостаточный контекст для следующей сессии по имплементации
-оставшихся плееров kinomix. Цель: расширить охват озвучек/качества.
+Этот документ — фиксированный аудит остальных 6 провайдеров kinomix.web.app,
+сделанный 2026-05-24. Цель была расширить охват озвучек.
 
 ---
 
-## TL;DR
+## TL;DR (итог 2 итераций аудита)
 
-`kinomix.web.app` использует `api.kinobox.tv` как агрегатор. Для каждого
-`kinopoisk_id` он возвращает массив доступных embed-провайдеров. Сейчас мы
-поддерживаем 1 из 8: **Collaps** (player-venom на `api.ortified.ws`) —
-переиспользуем парсер от lordfilm.
+| Provider | Verdict | Notes |
+|---|---|---|
+| **Collaps** | ✅ shipped | (76de998) Multi-audio HLS, 720p. Direct undici-fetch с VPS. |
+| **Videoseed** | ✅ shipped | Playwright + route-fulfill `videoseed.tv` wrapper (Sec-Fetch-Dest: iframe) + base64 Playerjs decode. CDN `storage.videoseedcdn.com`. Добавляет голос "Comedy Central". |
+| **Vibix** | ✅ shipped | Playwright + coldfilm.ink wrapper с publisher SDK по kp_id → kinescopecdn iframe → embed-(serials\|movies) API response → XOR-decode (lampac key `RySdvcyu5iTUxn97vn4HwoniwgxaCynA`) → прямые подписанные m3u8. Единственный 1080p источник. |
+| **Flixcdn** | ⚠️ opt-in (`WATCH_FLIXCDN=1`) | Код готов, но Cloudflare Turnstile блокирует Playwright fingerprint (401 на cdn-cgi/.../pat). Голоса дублируют Videoseed (Comedy Central) — нет смысла включать. |
+| **Gencit** | ❌ defer | Anti-frame: горсез.org → ylitron.pro отдаёт "404 Not Found" с JS-стрипом body в iframe. Нет open-source решения. |
+| **Turbo** | ❌ defer | `wsdk.js` proprietary anti-bot SDK, 403 даже в Playwright. Лампак комментарий "usually doesn't work". |
+| **Alloha (sansa)** | ❌ defer | Требует **paid token** ($30/мес) для прямого API. Иначе только iframe-passthrough. |
 
-Цель: добавить остальные 6 (Alloha, Turbo, Gencit, Vibix, Videoseed, Flixcdn)
-для расширения списка озвучек.
+**Итог**: для тестового kp_id 277565 — было 2 голоса (Collaps), стало 6:
+Collaps×2 (Кураж-Бамбей multi-audio, Eng.Original) + Videoseed×3 (Кураж-Бамбей,
+Английский, Comedy Central) + Vibix×1 (Кураж-Бамбей в 1080p).
 
-Рекомендуемый порядок (по сложности):
-1. **Flixcdn** — URL уже содержит kinopoisk_id, скорее всего простой HTTP-flow
-2. **Vibix** — обычный iframe embed
-3. **Gencit** — `horsez.org/lat/<id>?voice=N`
-4. **Turbo** — обфусцированный URL, нужен Playwright
-5. **Videoseed** — token-signed iframe
-6. **Alloha (sansa)** — самый закрытый, POST + JS-decoder
+**Архитектурное решение**: `captureFromKinomix` агрегирует voices от всех провайдеров
+в одну `PlayerStructure`, дедуп по имени с суффиксом `(Videoseed)`/`(Vibix)`.
+URL'ы Vibix/Videoseed валидны ~1h — re-resolve при probeCache miss. Crawler
+`scripts/crawl-kinomix.mjs` сохраняет `videoseed_iframe`, `vibix_available`,
+`ortified_id`, `flixcdn.*` в `data/kinomix-cache.json`.
+
+**Не реализовано** (с обоснованием):
+- Gencit/Turbo — нет public solution (research lampac/reyohoho)
+- Alloha — требует платный token API
+- Flixcdn — Cloudflare Turnstile блокирует автоматизированный браузер
 
 ---
 

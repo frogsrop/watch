@@ -7,6 +7,9 @@ export interface VoiceInfo {
   // Для venom-player'а (lordfilm): озвучка = audio track в одном master.m3u8.
   // Если задано — клиент после loadSource выставит hls.audioTrack = audioTrack.
   audioTrack?: number;
+  // Имя провайдера для kinomix-агрегатора (Collaps/Videoseed/Vibix). У других
+  // источников undefined — UI скрывает row выбора плеера.
+  provider?: string;
 }
 
 export interface SubtitleInfo {
@@ -44,6 +47,7 @@ export interface ExtractResult {
     voiceId?: number;
     voiceTitle: string;
     audioTrack?: number;
+    provider?: string;
   };
 }
 
@@ -51,6 +55,7 @@ export interface SelectionOpts {
   season?: string; // either "Сезон 5", "s05", "5", or full season label
   episode?: string;
   voice?: string;
+  provider?: string;
 }
 
 export class ExtractorError extends Error {
@@ -555,18 +560,24 @@ function matchEpisode(season: SeasonInfo, selector?: string): EpisodeInfo | null
   return season.episodes[0] ?? null;
 }
 
-function matchVoice(episode: EpisodeInfo, selector?: string): VoiceInfo | null {
-  if (!selector) return episode.voices[0] ?? null;
+function matchVoice(episode: EpisodeInfo, selector?: string, provider?: string): VoiceInfo | null {
+  // Если задан провайдер — фильтруем кандидатов сначала по нему; если ни одного
+  // голоса в episode с этим провайдером нет — фолбэк на полный список.
+  const candidates = provider
+    ? episode.voices.filter((v) => (v.provider ?? '').toLowerCase() === provider.toLowerCase())
+    : episode.voices;
+  const pool = candidates.length > 0 ? candidates : episode.voices;
+  if (!selector) return pool[0] ?? null;
   const t = selector.trim().toLowerCase();
-  for (const v of episode.voices) {
+  for (const v of pool) {
     if (v.title === selector) return v;
     if (v.title.toLowerCase() === t) return v;
   }
   // partial match (например "Кубик в Кубе" → "Кубик в Кубе (Проф. двухголосый)")
-  for (const v of episode.voices) {
+  for (const v of pool) {
     if (v.title.toLowerCase().startsWith(t)) return v;
   }
-  return episode.voices[0] ?? null;
+  return pool[0] ?? null;
 }
 
 export function detectSource(url: string): 'kinogo' | 'lordfilm' | 'theboys' | 'kinomix' | null {
@@ -582,9 +593,18 @@ export function detectSource(url: string): 'kinogo' | 'lordfilm' | 'theboys' | '
 // api.kinobox.tv блокирует datacenter IPs через TLS-фингерпринт, но api.ortified.ws
 // доступен с VPS обычным undici-fetch'ом. Маппинг (kinopoisk_id → ortified_id)
 // собирается локально через scripts/crawl-kinomix.mjs в data/kinomix-cache.json.
+interface FlixcdnPayload {
+  show_id: number;
+  is_serial: boolean;
+  seasons_episodes: Record<string, number[]>;
+  translations: { id: number; title: string }[];
+}
 interface KinomixCacheEntry {
   kinopoisk_id: number;
-  ortified_id: number;
+  ortified_id?: number;
+  flixcdn?: FlixcdnPayload;
+  videoseed_iframe?: string;
+  vibix_available?: boolean;
   title?: string | null;
 }
 interface KinomixCache {
@@ -633,6 +653,321 @@ function parseKinomixUrl(pageUrl: string): { kinopoisk_id: number } | null {
   }
 }
 
+/**
+ * Videoseed (tv-1-kinoserial.net) — Playerjs формат с base64-кодированным
+ * playlist. Direct undici-fetch возвращает 503 (anti-bot по cookie/session
+ * binding), iframe-load в Playwright проходит. Открываем iframe-URL с Referer
+ * https://videoseed.tv/, перехватываем response, парсим Playerjs("#2<base64>"),
+ * стрипаем #2 и |||...== маркеры, base64-decode → JSON. Voices в каждом
+ * эпизоде — строка вида "{voice} url.m3u8;{voice} url.m3u8;...".
+ */
+async function captureFromVideoseed(iframeUrl: string): Promise<PlayerStructure> {
+  const context = await newContext();
+  try {
+    const page = await context.newPage();
+    // Прямой page.goto(iframeUrl) триггерит anti-bot: Videoseed ловит
+    // Sec-Fetch-Dest: document. Воркэраунд (как у lampac): грузим wrapper-HTML
+    // на хосте videoseed.tv (route-fulfill), внутри iframe = настоящий embed —
+    // он загружается с Sec-Fetch-Dest: iframe + Referer: videoseed.tv.
+    const wrapperUrl = 'https://videoseed.tv/__watch_wrapper__';
+    await page.route('**/*', async (route) => {
+      try {
+        const url = route.request().url();
+        if (url === wrapperUrl) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'text/html',
+            body: `<!doctype html><html><body style="margin:0"><iframe src="${iframeUrl.replace(/"/g, '&quot;')}" style="width:100vw;height:100vh;border:0"></iframe></body></html>`,
+          });
+          return;
+        }
+        await route.continue();
+      } catch {
+        try { await route.continue(); } catch {}
+      }
+    });
+    let captured: string | null = null;
+    page.on('response', async (res) => {
+      if (res.url() === iframeUrl && !captured) {
+        try { captured = await res.text(); } catch {}
+      }
+    });
+    await page.goto(wrapperUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+    if (!captured) {
+      try { await page.waitForResponse((r) => r.url() === iframeUrl, { timeout: 15_000 }); } catch {}
+      if (!captured) await page.waitForTimeout(1500);
+    }
+    if (!captured) throw new ExtractorError('videoseed: не перехватили iframe response', 'playlist');
+
+    const m = (captured as string).match(/new Playerjs\("([^"]+)"\)/);
+    if (!m || !m[1]) throw new ExtractorError('videoseed: Playerjs("...") не найден', 'playlist');
+    // Strip leading `#2`, strip `|||...==` watermarks, base64-decode.
+    let s = m[1].substring(2).replace(/\|\|\|[^=|]+==/g, '');
+    let json: string;
+    try {
+      json = Buffer.from(s, 'base64').toString('utf-8');
+    } catch (e) {
+      throw new ExtractorError(`videoseed: base64 decode failed: ${(e as Error).message}`, 'playlist');
+    }
+    let root: { file?: unknown };
+    try {
+      root = JSON.parse(json);
+    } catch {
+      throw new ExtractorError('videoseed: decoded body не JSON', 'playlist');
+    }
+
+    const parseVoices = (str: string): VoiceInfo[] => {
+      const voices: VoiceInfo[] = [];
+      for (const part of String(str).split(';')) {
+        const vm = part.trim().match(/^\{([^}]+)\}\s*(https?:\/\/\S+\.m3u8\S*)/);
+        if (vm && vm[1] && vm[2]) voices.push({ title: vm[1].trim(), file: vm[2].trim() });
+      }
+      return voices;
+    };
+
+    const seasons: SeasonInfo[] = [];
+    const fileNode = root.file;
+    if (Array.isArray(fileNode)) {
+      // Сериал: file = [{title:"1 сезон", folder:[{title:"1 серия", id:"s1v1", file:"..."}]}]
+      for (const s of fileNode as Array<{ title?: string; folder?: Array<{ id?: string; title?: string; file?: string }> }>) {
+        const sNumMatch = String(s.title ?? '').match(/(\d+)/);
+        const sId = sNumMatch && sNumMatch[1] ? sNumMatch[1] : String(seasons.length + 1);
+        const episodes: EpisodeInfo[] = [];
+        for (const e of s.folder ?? []) {
+          const eNumMatch = String(e.title ?? e.id ?? '').match(/(\d+)/);
+          const eId = eNumMatch && eNumMatch[1] ? eNumMatch[1] : String(episodes.length + 1);
+          const voices = parseVoices(e.file ?? '');
+          if (voices.length) episodes.push({ id: eId, title: `Серия ${eId}`, voices });
+        }
+        if (episodes.length) seasons.push({ id: sId, title: `Сезон ${sId}`, episodes });
+      }
+    } else if (typeof fileNode === 'string') {
+      // Фильм: один эпизод со списком голосов.
+      const voices = parseVoices(fileNode);
+      if (voices.length) {
+        seasons.push({ id: 'film', title: 'Фильм', episodes: [{ id: 'film', title: '1', voices }] });
+      }
+    }
+    return { seasons };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+/**
+ * Vibix (kinescopecdn.net). lampac-style coldfilm flow:
+ *  - Грузим coldfilm.ink (route-fulfill с `<ins data-publisher-id="674784070"
+ *    data-type="kp" data-id="<kp>">` + rendex-sdk.min.js). SDK инжектит iframe
+ *    с kinescopecdn.net на основе kp_id.
+ *  - Перехватываем response от `kinescopecdn.net/api/v1/embed-(serials|movies)/<id>`.
+ *    Это `{p: <base64-reversed-XOR>, v: 1}` JSON.
+ *  - Декодируем: `reverse(p)` → base64 → XOR с фиксированным ключом lampac
+ *    `RySdvcyu5iTUxn97vn4HwoniwgxaCynA` → JSON со структурой и СРАЗУ подписанными
+ *    m3u8 URLs (`?expires=<unix>&sign=<hex>`, ~1h TTL).
+ */
+const VIBIX_XOR_KEY = Buffer.from('RySdvcyu5iTUxn97vn4HwoniwgxaCynA', 'ascii');
+
+interface VibixData {
+  data?: {
+    playlist?: { title?: string; folder?: { title?: string; file?: string }[] }[];
+    file?: string;
+  };
+}
+
+function parseVibixFile(file: string): VoiceInfo[] {
+  // Формат: [Qp]{voice}url,[Qp]{voice}url,... — один URL на (voice, quality).
+  // Из качества пикаем максимально доступное (1080 → 720 → 480).
+  const byVoice = new Map<string, Map<number, string>>();
+  const re = /\[(\d+)p\]\{([^}]+)\}(https?:\/\/[^,\s[]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(file)) !== null) {
+    const q = Number(m[1]);
+    const voice = m[2]!.trim();
+    const url = m[3]!.trim();
+    if (!byVoice.has(voice)) byVoice.set(voice, new Map());
+    byVoice.get(voice)!.set(q, url);
+  }
+  const voices: VoiceInfo[] = [];
+  for (const [name, qmap] of byVoice) {
+    const url = qmap.get(1080) ?? qmap.get(720) ?? qmap.get(480) ?? [...qmap.values()][0];
+    if (url) voices.push({ title: name, file: url });
+  }
+  return voices;
+}
+
+async function captureFromVibix(kpId: number): Promise<PlayerStructure> {
+  const context = await newContext();
+  try {
+    const page = await context.newPage();
+    let embedBody: string | null = null;
+    page.on('response', async (res) => {
+      if (embedBody) return;
+      if (/\/api\/v1\/embed-(serials|movies)\/\d+\?/.test(res.url())) {
+        try { embedBody = await res.text(); } catch {}
+      }
+    });
+    await page.route('**/*', async (route) => {
+      try {
+        const url = route.request().url();
+        if (url.startsWith('https://coldfilm.ink')) {
+          await route.fulfill({
+            status: 200, contentType: 'text/html',
+            body:
+              `<html lang="ru"><head><meta charset="UTF-8">` +
+              `<script src="https://graphicslab.io/sdk/v2/rendex-sdk.min.js"></script>` +
+              `</head><body><ins data-publisher-id="674784070" data-type="kp" data-id="${kpId}"></ins></body></html>`,
+          });
+          return;
+        }
+        // Ускорение: грузим только нужные хосты, обрезаем /hls/ (фактическое видео).
+        if (!/(kinescopecdn|graphicslab|coldfilm)\./.test(url) || url.includes('/hls/')) {
+          try { await route.abort(); } catch {}
+          return;
+        }
+        await route.continue();
+      } catch {
+        try { await route.continue(); } catch {}
+      }
+    });
+    await page.goto('https://coldfilm.ink/', { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+    for (let i = 0; i < 40 && !embedBody; i++) await page.waitForTimeout(500);
+    if (!embedBody) throw new ExtractorError('vibix: не перехватили embed response', 'playlist');
+
+    let parsed: { p?: string; v?: number };
+    try { parsed = JSON.parse(embedBody); } catch { throw new ExtractorError('vibix: embed body не JSON', 'playlist'); }
+    if (!parsed.p || parsed.v !== 1) throw new ExtractorError('vibix: нет {p,v=1}', 'playlist');
+
+    const reversed = parsed.p.split('').reverse().join('');
+    const padded = reversed + '='.repeat((4 - (reversed.length % 4)) % 4);
+    const buf = Buffer.from(padded, 'base64');
+    const keyLen = VIBIX_XOR_KEY.length;
+    for (let i = 0; i < buf.length; i++) buf[i]! ^= VIBIX_XOR_KEY[i % keyLen]!;
+    const text = buf.toString('utf-8');
+
+    let root: VibixData;
+    try { root = JSON.parse(text); } catch { throw new ExtractorError('vibix: decoded body не JSON', 'playlist'); }
+    const data = root.data;
+    if (!data) throw new ExtractorError('vibix: пустой data', 'playlist');
+
+    const seasons: SeasonInfo[] = [];
+    if (Array.isArray(data.playlist)) {
+      for (const s of data.playlist) {
+        const sNumMatch = String(s.title ?? '').match(/(\d+)/);
+        const sId = sNumMatch && sNumMatch[1] ? sNumMatch[1] : String(seasons.length + 1);
+        const episodes: EpisodeInfo[] = [];
+        for (const e of s.folder ?? []) {
+          const eNumMatch = String(e.title ?? '').match(/(\d+)/);
+          const eId = eNumMatch && eNumMatch[1] ? eNumMatch[1] : String(episodes.length + 1);
+          const voices = parseVibixFile(e.file ?? '');
+          if (voices.length) episodes.push({ id: eId, title: `Серия ${eId}`, voices });
+        }
+        if (episodes.length) seasons.push({ id: sId, title: `Сезон ${sId}`, episodes });
+      }
+    } else if (typeof data.file === 'string') {
+      const voices = parseVibixFile(data.file);
+      if (voices.length) seasons.push({ id: 'film', title: 'Фильм', episodes: [{ id: 'film', title: '1', voices }] });
+    }
+    return { seasons };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function captureCollapsForKinomix(ortifiedId: number): Promise<PlayerStructure> {
+  const embedUrl = `https://api.ortified.ws/embed/movie/${ortifiedId}`;
+  dbg(`kinomix: collaps ortified_id=${ortifiedId}, fetching ${embedUrl}`);
+  const { request } = await import('undici');
+  const res = await request(embedUrl, {
+    headers: { 'user-agent': UA, referer: 'https://kinomix.web.app/' },
+  });
+  if (res.statusCode !== 200) throw new ExtractorError(`ortified embed HTTP ${res.statusCode}`, 'playlist');
+  const body = await res.body.text();
+  const seasons = extractVenomSeasons(body);
+  if (!seasons || seasons.length === 0) throw new ExtractorError('ortified: venom seasons не извлеклись', 'playlist');
+  return structureFromVenom([{ playlist: { seasons } }]);
+}
+
+/**
+ * Строит PlayerStructure из Flixcdn payload. Каждый episode получает voiceFile
+ * = `flixcdn-resolve:<show>|<trans>|<s>|<e>` маркер. Сервер при запросе
+ * /hls/.../index.m3u8 вызывает resolveFlixcdnVoice() через shared Playwright.
+ */
+function flixcdnPayloadToStructure(p: FlixcdnPayload): PlayerStructure {
+  const seasons: SeasonInfo[] = [];
+  // p.is_serial=true → seasons_episodes={"1":[1..],"2":[1..]}; иначе фильм.
+  if (p.is_serial && Object.keys(p.seasons_episodes).length > 0) {
+    for (const [sNum, eps] of Object.entries(p.seasons_episodes)) {
+      const episodes: EpisodeInfo[] = [];
+      for (const eNum of eps) {
+        const voices: VoiceInfo[] = p.translations.map((t) => ({
+          voice_id: t.id,
+          title: t.title,
+          file: `flixcdn-resolve:${p.show_id}|${t.id}|${sNum}|${eNum}`,
+        }));
+        if (voices.length) episodes.push({ id: String(eNum), title: `Серия ${eNum}`, voices });
+      }
+      if (episodes.length) seasons.push({ id: String(sNum), title: `Сезон ${sNum}`, episodes });
+    }
+  } else {
+    // Фильм: один сезон 'film' / один эпизод 'film', один voice per translation.
+    const voices: VoiceInfo[] = p.translations.map((t) => ({
+      voice_id: t.id,
+      title: t.title,
+      file: `flixcdn-resolve:${p.show_id}|${t.id}|1|1`,
+    }));
+    if (voices.length) {
+      seasons.push({ id: 'film', title: 'Фильм', episodes: [{ id: 'film', title: '1', voices }] });
+    }
+  }
+  return { seasons };
+}
+
+/**
+ * Сливает структуры разных провайдеров в одну, проставляя `voice.provider`.
+ * Сезоны/эпизоды объединяются по id; voices конкатенируются. Provider используется
+ * UI'ем для отдельного row выбора плеера (кросс-провайдерные одноимённые голоса
+ * не сливаются в один — пользователь выбирает оба независимо).
+ */
+function mergeStructures(base: PlayerStructure, baseProvider: string, add: PlayerStructure, addProvider: string): PlayerStructure {
+  const stamp = (s: PlayerStructure, provider: string): PlayerStructure => ({
+    seasons: s.seasons.map((sn) => ({
+      ...sn,
+      episodes: sn.episodes.map((e) => ({
+        ...e,
+        voices: e.voices.map((v) => ({ ...v, provider: v.provider ?? provider })),
+      })),
+    })),
+  });
+  const baseS = stamp(base, baseProvider);
+  const addS = stamp(add, addProvider);
+  if (baseS.seasons.length === 0) return addS;
+  if (addS.seasons.length === 0) return baseS;
+  const seasonMap = new Map<string, SeasonInfo>();
+  for (const s of baseS.seasons) seasonMap.set(s.id, { ...s, episodes: s.episodes.map((e) => ({ ...e, voices: [...e.voices] })) });
+  for (const s of addS.seasons) {
+    const existing = seasonMap.get(s.id);
+    if (!existing) {
+      seasonMap.set(s.id, { ...s, episodes: s.episodes.map((e) => ({ ...e, voices: [...e.voices] })) });
+      continue;
+    }
+    const epMap = new Map<string, EpisodeInfo>(existing.episodes.map((e) => [e.id, e]));
+    for (const e of s.episodes) {
+      const eExisting = epMap.get(e.id);
+      if (!eExisting) {
+        existing.episodes.push({ ...e, voices: [...e.voices] });
+        continue;
+      }
+      for (const v of e.voices) eExisting.voices.push(v);
+    }
+  }
+  // Восстанавливаем порядок сезонов: base первым, потом новые из add.
+  const merged: SeasonInfo[] = [];
+  const seen = new Set<string>();
+  for (const s of baseS.seasons) { merged.push(seasonMap.get(s.id)!); seen.add(s.id); }
+  for (const s of addS.seasons) if (!seen.has(s.id)) merged.push(seasonMap.get(s.id)!);
+  return { seasons: merged };
+}
+
 async function captureFromKinomix(pageUrl: string): Promise<{
   playlist: PlayerStructure;
   cookies: ExtractResult['cookies'];
@@ -647,29 +982,142 @@ async function captureFromKinomix(pageUrl: string): Promise<{
       'playlist',
     );
   }
-  // Прямой HTTP fetch к api.ortified.ws (тот же venom-формат что в lordfilm).
-  const embedUrl = `https://api.ortified.ws/embed/movie/${entry.ortified_id}`;
-  dbg(`kinomix: ${parsed.kinopoisk_id} → ortified ${entry.ortified_id}, fetching ${embedUrl}`);
-  const { request } = await import('undici');
-  const res = await request(embedUrl, {
-    headers: {
-      'user-agent': UA,
-      referer: 'https://kinomix.web.app/',
-    },
-  });
-  if (res.statusCode !== 200) {
-    throw new ExtractorError(`ortified embed HTTP ${res.statusCode}`, 'playlist');
+
+  let playlist: PlayerStructure = { seasons: [] };
+  const errors: string[] = [];
+
+  if (entry.ortified_id) {
+    try {
+      const collaps = await captureCollapsForKinomix(entry.ortified_id);
+      playlist = mergeStructures(playlist, 'Collaps', collaps, 'Collaps');
+    } catch (e) {
+      errors.push(`collaps: ${(e as Error).message}`);
+    }
   }
-  const body = await res.body.text();
-  const seasons = extractVenomSeasons(body);
-  if (!seasons || seasons.length === 0) {
-    throw new ExtractorError('ortified body: venom seasons не извлеклись', 'playlist');
+  // Flixcdn выключен по умолчанию: Cloudflare Turnstile на /api/player/files
+  // блокирует Playwright fingerprint (401 на cdn-cgi/challenge-platform/.../pat),
+  // даже headed Google Chrome stable не проходит. Опт-ин через WATCH_FLIXCDN=1
+  // (например на VPS с другим IP/историей сессий есть шанс что пройдёт).
+  if (entry.flixcdn && process.env.WATCH_FLIXCDN === '1') {
+    try {
+      const flix = flixcdnPayloadToStructure(entry.flixcdn);
+      playlist = mergeStructures(playlist, 'Collaps', flix, 'Flixcdn');
+    } catch (e) {
+      errors.push(`flixcdn: ${(e as Error).message}`);
+    }
   }
-  const playlist = structureFromVenom([{ playlist: { seasons } }]);
+  if (entry.videoseed_iframe) {
+    dbg(`videoseed: fetching ${entry.videoseed_iframe}`);
+    try {
+      const vs = await captureFromVideoseed(entry.videoseed_iframe);
+      dbg(`videoseed: got ${vs.seasons.length} seasons, ${vs.seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`);
+      playlist = mergeStructures(playlist, 'Collaps', vs, 'Videoseed');
+    } catch (e) {
+      dbg(`videoseed FAILED: ${(e as Error).message}`);
+      errors.push(`videoseed: ${(e as Error).message}`);
+    }
+  } else {
+    dbg(`videoseed: no iframe in cache for kp=${parsed.kinopoisk_id}`);
+  }
+  if (entry.vibix_available) {
+    dbg(`vibix: capturing for kp=${parsed.kinopoisk_id}`);
+    try {
+      const vx = await captureFromVibix(parsed.kinopoisk_id);
+      dbg(`vibix: got ${vx.seasons.length} seasons, ${vx.seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`);
+      playlist = mergeStructures(playlist, 'Collaps', vx, 'Vibix');
+    } catch (e) {
+      dbg(`vibix FAILED: ${(e as Error).message}`);
+      errors.push(`vibix: ${(e as Error).message}`);
+    }
+  }
+
   if (playlist.seasons.length === 0) {
-    throw new ExtractorError('venom seasons after normalization пусто', 'playlist');
+    throw new ExtractorError(`kinomix: нет данных (${errors.join('; ') || 'кеш пуст'})`, 'playlist');
   }
+  dbg(
+    `kinomix kp=${parsed.kinopoisk_id}: ${playlist.seasons.length} seasons, ${playlist.seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`,
+  );
   return { playlist, cookies: [] };
+}
+
+/**
+ * Резолвит flixcdn-resolve:<show>|<trans>|<s>|<e> маркер в свежий m3u8 URL.
+ * tarantino.factorios.live/api/player/files требует Cloudflare Turnstile-pass
+ * (POST с не-браузерным fingerprint отвечает "captcha failed"), поэтому делаем
+ * через shared Playwright: открываем embed-страницу в контексте, выполняем
+ * fetch() из контекста — Cloudflare cf_clearance автоматически set'ится.
+ * Возвращает URL качества 720 (или максимально доступного).
+ */
+export async function resolveFlixcdnVoice(marker: string): Promise<string | null> {
+  const m = marker.match(/^flixcdn-resolve:(\d+)\|(\d+)\|(\d+)\|(\d+)$/);
+  if (!m) return null;
+  const [, showId, translation, seasonNum, episodeNum] = m;
+  // Embed URL должен быть по kinopoisk_id, но у нас нет обратного маппинга
+  // show_id → kp_id. Используем любой URL, который Flixcdn принимает —
+  // /show/kinopoisk/0 тоже отдаёт страницу с Cloudflare challenge, но эта
+  // страница не содержит data для нашего show_id. Используем формат с показом
+  // по внутреннему id: /show/<show_id> (если такой роут есть), иначе передаём
+  // через какой-нибудь kp страницы — Cloudflare check универсален per-domain.
+  // Простейший вариант: грузим /show/kinopoisk/277565 как разогрев Cloudflare,
+  // потом fetch'им API с нашим show_id (cf_clearance работает на весь домен).
+  const context = await newContext();
+  try {
+    const page = await context.newPage();
+    // Загрузка embed-страницы инициализирует Cloudflare JS challenge → cf_clearance
+    // cookie. Сам player на странице сразу делает POST /api/player/files когда
+    // готов — ждём это вместо blind timeout.
+    const playerCallDone = page
+      .waitForResponse(
+        (r) => r.url().includes('/api/player/files') && r.request().method() === 'POST',
+        { timeout: 25_000 },
+      )
+      .catch(() => null);
+    await page.goto(`https://tarantino.factorios.live/show/kinopoisk/${showId}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 20_000,
+    }).catch(() => {});
+    await playerCallDone;
+    const res = await page.evaluate(async (body) => {
+      const r = await fetch('https://tarantino.factorios.live/api/player/files', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        credentials: 'include',
+      });
+      const text = await r.text();
+      return { status: r.status, text };
+    }, {
+      id: Number(showId),
+      translation: Number(translation),
+      season_number: Number(seasonNum),
+      episode_number: Number(episodeNum),
+      force_cdn: '',
+    });
+    if (res.status !== 200) {
+      dbg(`flixcdn resolve HTTP ${res.status}: ${res.text.slice(0, 200)}`);
+      return null;
+    }
+    let json: { file?: string };
+    try {
+      json = JSON.parse(res.text);
+    } catch {
+      dbg(`flixcdn resolve: bad json ${res.text.slice(0, 200)}`);
+      return null;
+    }
+    if (!json.file) return null;
+    // file = "[360]url,[480]url,[720]url,[1080]url" — пикаем 720 (или 1080, или max).
+    const qualities = new Map<number, string>();
+    for (const part of json.file.split(',')) {
+      const mm = part.match(/^\[(\d+)\](.+)$/);
+      if (mm && mm[1] && mm[2]) qualities.set(Number(mm[1]), mm[2]);
+    }
+    if (qualities.size === 0) return null;
+    const prefer = [720, 1080, 480, 360];
+    for (const q of prefer) if (qualities.has(q)) return qualities.get(q) ?? null;
+    return [...qualities.values()][0] ?? null;
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 // theboys.fun блокирует datacenter IP, поэтому Playwright-extract не работает с VPS.
@@ -827,7 +1275,7 @@ export async function extractM3U8(
   if (!season) throw new ExtractorError('no seasons in playlist', 'select');
   const episode = matchEpisode(season, effectiveOpts.episode);
   if (!episode) throw new ExtractorError(`season ${season.title}: no episodes`, 'select');
-  const voice = matchVoice(episode, effectiveOpts.voice);
+  const voice = matchVoice(episode, effectiveOpts.voice, effectiveOpts.provider);
   if (!voice) throw new ExtractorError(`${season.title}/${episode.title}: no voices`, 'select');
 
   dbg(`selected ${season.title} / ${episode.title} / ${voice.title} (source=${source})`);
@@ -844,6 +1292,7 @@ export async function extractM3U8(
       voiceId: voice.voice_id,
       voiceTitle: voice.title,
       audioTrack: voice.audioTrack,
+      provider: voice.provider,
     },
   };
 }
