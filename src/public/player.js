@@ -38,7 +38,7 @@
 
   // Sync tuning
   const HEARTBEAT_INTERVAL_MS = 10_000; // лидер шлёт snapshot времени раз в 10с
-  const DRIFT_RESYNC_THRESHOLD_S = 3;   // зритель ресинкается если расхождение > 3с
+  const DRIFT_RESYNC_THRESHOLD_S = 1.5; // зритель ресинкается если расхождение > 1.5с
 
   function manifestUrl() {
     return `${BASE}/hls/${roomId}/index.m3u8?v=${sourceVersion}`;

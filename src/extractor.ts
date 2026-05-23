@@ -1,10 +1,5 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
-export interface PlayerOption {
-  value: string;
-  label: string;
-}
-
 export interface VoiceInfo {
   voice_id?: number;
   title: string;
@@ -358,17 +353,6 @@ function matchVoice(episode: EpisodeInfo, selector?: string): VoiceInfo | null {
     if (v.title.toLowerCase().startsWith(t)) return v;
   }
   return episode.voices[0] ?? null;
-}
-
-export async function probePlayer(
-  pageUrl: string,
-  opts: SelectionOpts & { timeoutMs?: number } = {},
-): Promise<PlayerStructure> {
-  void opts.season;
-  void opts.episode;
-  void opts.voice;
-  const { playlist } = await captureFromKinogo(pageUrl, opts.timeoutMs ?? 45_000);
-  return playlist;
 }
 
 export async function extractM3U8(
