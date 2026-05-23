@@ -51,7 +51,6 @@ coverage/
 
 # Misc temp
 tmp/
-data/
 .cache/
 .parcel-cache/
 

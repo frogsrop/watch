@@ -1,0 +1,2585 @@
+{
+  "source": "theboys.fun",
+  "slug": "pacany",
+  "playlist_id": 424,
+  "extracted_at": "2026-05-23T16:24:43.426Z",
+  "seasons": [
+    {
+      "season": 1,
+      "episodes": [
+        {
+          "episode": 1,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2080890,
+              "duration": 3598
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557313,
+              "duration": 3598
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737296,
+              "duration": 3635
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116410,
+              "duration": 3610
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620837,
+              "duration": 3598
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412813,
+              "duration": 3610
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606669,
+              "duration": 3598
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670320,
+              "duration": 3610
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670003,
+              "duration": 3610
+            }
+          ]
+        },
+        {
+          "episode": 2,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416895,
+              "duration": 3547
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557314,
+              "duration": 3535
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737297,
+              "duration": 3566
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116411,
+              "duration": 3547
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620838,
+              "duration": 3535
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412814,
+              "duration": 3547
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606670,
+              "duration": 3535
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670321,
+              "duration": 3547
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670004,
+              "duration": 3547
+            }
+          ]
+        },
+        {
+          "episode": 3,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416896,
+              "duration": 3298
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2079107,
+              "duration": 3298
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737298,
+              "duration": 3308
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116412,
+              "duration": 3298
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620839,
+              "duration": 3286
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412815,
+              "duration": 3298
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606671,
+              "duration": 3286
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670322,
+              "duration": 3298
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670005,
+              "duration": 3298
+            }
+          ]
+        },
+        {
+          "episode": 4,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416897,
+              "duration": 3394
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2079108,
+              "duration": 3394
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737299,
+              "duration": 3433
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116413,
+              "duration": 3394
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620840,
+              "duration": 3382
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412816,
+              "duration": 3394
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606672,
+              "duration": 3382
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670323,
+              "duration": 3394
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670006,
+              "duration": 3394
+            }
+          ]
+        },
+        {
+          "episode": 5,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 114286,
+              "duration": 3624
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2079109,
+              "duration": 3615
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737300,
+              "duration": 3638
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116380,
+              "duration": 3615
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620841,
+              "duration": 3604
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412817,
+              "duration": 3615
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606673,
+              "duration": 3604
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670324,
+              "duration": 3615
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670007,
+              "duration": 3615
+            }
+          ]
+        },
+        {
+          "episode": 6,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 114604,
+              "duration": 3624
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2079110,
+              "duration": 3615
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737301,
+              "duration": 3638
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116379,
+              "duration": 3615
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620842,
+              "duration": 3603
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412818,
+              "duration": 3615
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606674,
+              "duration": 3603
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670325,
+              "duration": 3615
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670008,
+              "duration": 3615
+            }
+          ]
+        },
+        {
+          "episode": 7,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 115597,
+              "duration": 3394
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557319,
+              "duration": 3373
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737302,
+              "duration": 3421
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 116378,
+              "duration": 3385
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620843,
+              "duration": 3373
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412819,
+              "duration": 3385
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606675,
+              "duration": 3373
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670326,
+              "duration": 3385
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670009,
+              "duration": 3385
+            }
+          ]
+        },
+        {
+          "episode": 8,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 115841,
+              "duration": 4009
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557320,
+              "duration": 3988
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 737303,
+              "duration": 4022
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 113054,
+              "duration": 4000
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 620844,
+              "duration": 3988
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412820,
+              "duration": 4000
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606676,
+              "duration": 3988
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670327,
+              "duration": 4000
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670010,
+              "duration": 4000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 2,
+      "episodes": [
+        {
+          "episode": 1,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416861,
+              "duration": 3777
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2084959,
+              "duration": 3766
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620825,
+              "duration": 3777
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408274,
+              "duration": 3777
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621441,
+              "duration": 3766
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412801,
+              "duration": 3777
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606677,
+              "duration": 3777
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670029,
+              "duration": 3777
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670012,
+              "duration": 3777
+            }
+          ]
+        },
+        {
+          "episode": 2,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2081055,
+              "duration": 3566
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557331,
+              "duration": 3555
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620826,
+              "duration": 3566
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408275,
+              "duration": 3566
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621442,
+              "duration": 3555
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412802,
+              "duration": 3566
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606678,
+              "duration": 3566
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670030,
+              "duration": 3567
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670013,
+              "duration": 3566
+            }
+          ]
+        },
+        {
+          "episode": 3,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416863,
+              "duration": 3514
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557332,
+              "duration": 3503
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620827,
+              "duration": 3514
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408276,
+              "duration": 3514
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621443,
+              "duration": 3503
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412803,
+              "duration": 3514
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606679,
+              "duration": 3514
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670031,
+              "duration": 3515
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670014,
+              "duration": 3514
+            }
+          ]
+        },
+        {
+          "episode": 4,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416864,
+              "duration": 4091
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557333,
+              "duration": 4080
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620828,
+              "duration": 4091
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408277,
+              "duration": 4091
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621444,
+              "duration": 4080
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412804,
+              "duration": 4091
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606680,
+              "duration": 4091
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670032,
+              "duration": 4092
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670015,
+              "duration": 4091
+            }
+          ]
+        },
+        {
+          "episode": 5,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416865,
+              "duration": 3646
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557334,
+              "duration": 3635
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620829,
+              "duration": 3646
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408278,
+              "duration": 3646
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621445,
+              "duration": 3635
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412805,
+              "duration": 3646
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606681,
+              "duration": 3646
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670033,
+              "duration": 3647
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670016,
+              "duration": 3646
+            }
+          ]
+        },
+        {
+          "episode": 6,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416866,
+              "duration": 3912
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557338,
+              "duration": 3901
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620830,
+              "duration": 3912
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408279,
+              "duration": 3912
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621446,
+              "duration": 3901
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412806,
+              "duration": 3912
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606682,
+              "duration": 3912
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670034,
+              "duration": 3913
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670017,
+              "duration": 3912
+            }
+          ]
+        },
+        {
+          "episode": 7,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416867,
+              "duration": 3270
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557336,
+              "duration": 3259
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620831,
+              "duration": 3270
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408280,
+              "duration": 3270
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621447,
+              "duration": 3258
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412807,
+              "duration": 3270
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606683,
+              "duration": 3270
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670035,
+              "duration": 3271
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670018,
+              "duration": 3270
+            }
+          ]
+        },
+        {
+          "episode": 8,
+          "voices": [
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416868,
+              "duration": 4046
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 557337,
+              "duration": 4035
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620832,
+              "duration": 4046
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408281,
+              "duration": 4046
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621448,
+              "duration": 4035
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 412808,
+              "duration": 4046
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606684,
+              "duration": 4046
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670036,
+              "duration": 4047
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670019,
+              "duration": 4046
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 3,
+      "episodes": [
+        {
+          "episode": 1,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 381041,
+              "duration": 3719
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416869,
+              "duration": 3719
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 624703,
+              "duration": 3729
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620846,
+              "duration": 3637
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408290,
+              "duration": 3719
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621449,
+              "duration": 3725
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 380301,
+              "duration": 3728
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606685,
+              "duration": 3637
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670328,
+              "duration": 3634
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670020,
+              "duration": 3719
+            }
+          ]
+        },
+        {
+          "episode": 2,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 381384,
+              "duration": 3510
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416870,
+              "duration": 3590
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 624704,
+              "duration": 3600
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620847,
+              "duration": 3510
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408291,
+              "duration": 3590
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621450,
+              "duration": 3597
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 380299,
+              "duration": 3600
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606686,
+              "duration": 3510
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670329,
+              "duration": 3508
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670021,
+              "duration": 3590
+            }
+          ]
+        },
+        {
+          "episode": 3,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 385318,
+              "duration": 3589
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416871,
+              "duration": 3669
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 623445,
+              "duration": 3679
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620848,
+              "duration": 3589
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408292,
+              "duration": 3670
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621451,
+              "duration": 3676
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 380303,
+              "duration": 3679
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606687,
+              "duration": 3589
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670330,
+              "duration": 3587
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670022,
+              "duration": 3669
+            }
+          ]
+        },
+        {
+          "episode": 4,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 385319,
+              "duration": 3607
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416872,
+              "duration": 3687
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 639236,
+              "duration": 3697
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620849,
+              "duration": 3607
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408293,
+              "duration": 3688
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621452,
+              "duration": 3694
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 381213,
+              "duration": 3687
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606688,
+              "duration": 3607
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670331,
+              "duration": 3604
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670023,
+              "duration": 3687
+            }
+          ]
+        },
+        {
+          "episode": 5,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 387176,
+              "duration": 3671
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416873,
+              "duration": 3671
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 631604,
+              "duration": 3681
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620850,
+              "duration": 3591
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408294,
+              "duration": 3671
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621453,
+              "duration": 3678
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 385311,
+              "duration": 3681
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606689,
+              "duration": 3591
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670332,
+              "duration": 3588
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670024,
+              "duration": 3671
+            }
+          ]
+        },
+        {
+          "episode": 6,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 387995,
+              "duration": 3642
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416874,
+              "duration": 3642
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 638932,
+              "duration": 3652
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620851,
+              "duration": 3562
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408295,
+              "duration": 3644
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621454,
+              "duration": 3650
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 387516,
+              "duration": 3652
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606690,
+              "duration": 3562
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670333,
+              "duration": 3545
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670025,
+              "duration": 3643
+            }
+          ]
+        },
+        {
+          "episode": 7,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 388631,
+              "duration": 3813
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416875,
+              "duration": 3895
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 644575,
+              "duration": 3905
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620852,
+              "duration": 3813
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408296,
+              "duration": 3896
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621455,
+              "duration": 3902
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 388334,
+              "duration": 3905
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606691,
+              "duration": 3813
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670334,
+              "duration": 3792
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670026,
+              "duration": 3895
+            }
+          ]
+        },
+        {
+          "episode": 8,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 416877,
+              "duration": 3643
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 416876,
+              "duration": 3721
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 649771,
+              "duration": 3731
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 620853,
+              "duration": 3643
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 408297,
+              "duration": 3721
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 621456,
+              "duration": 3728
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 388874,
+              "duration": 3731
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 606692,
+              "duration": 3643
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 670335,
+              "duration": 3640
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 670027,
+              "duration": 3721
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 4,
+      "episodes": [
+        {
+          "episode": 1,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894765,
+              "duration": 3906
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 689626,
+              "duration": 3906
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 689623,
+              "duration": 3906
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 682218,
+              "duration": 3748
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 726938,
+              "duration": 3906
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 684965,
+              "duration": 3899
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 681905,
+              "duration": 3947
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 682566,
+              "duration": 3906
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737268,
+              "duration": 3906
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737252,
+              "duration": 3908
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 680533,
+              "duration": 3906
+            }
+          ]
+        },
+        {
+          "episode": 2,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894710,
+              "duration": 3713
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 689627,
+              "duration": 3713
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 689624,
+              "duration": 3713
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 682528,
+              "duration": 3571
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 728417,
+              "duration": 3713
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 684966,
+              "duration": 3697
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 681903,
+              "duration": 3754
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 682589,
+              "duration": 3713
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737269,
+              "duration": 3713
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737253,
+              "duration": 3714
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 680523,
+              "duration": 3713
+            }
+          ]
+        },
+        {
+          "episode": 3,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894774,
+              "duration": 3627
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 689628,
+              "duration": 3627
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 689625,
+              "duration": 3627
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 682529,
+              "duration": 3476
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 730318,
+              "duration": 3627
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 684967,
+              "duration": 3619
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 681904,
+              "duration": 3669
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 682590,
+              "duration": 3627
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737270,
+              "duration": 3627
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737254,
+              "duration": 3630
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 680525,
+              "duration": 3627
+            }
+          ]
+        },
+        {
+          "episode": 4,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894712,
+              "duration": 3973
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 691133,
+              "duration": 3973
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 691134,
+              "duration": 3973
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 689444,
+              "duration": 3826
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 733099,
+              "duration": 3973
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 689614,
+              "duration": 3960
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 689345,
+              "duration": 4015
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 689558,
+              "duration": 4017
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737271,
+              "duration": 3973
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737255,
+              "duration": 3974
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 689212,
+              "duration": 3973
+            }
+          ]
+        },
+        {
+          "episode": 5,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894713,
+              "duration": 4090
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 710916,
+              "duration": 4090
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 710914,
+              "duration": 4090
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 691273,
+              "duration": 3934
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 734929,
+              "duration": 4090
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 691479,
+              "duration": 4090
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 691125,
+              "duration": 4132
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 691787,
+              "duration": 4134
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737272,
+              "duration": 4090
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737256,
+              "duration": 4091
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 690901,
+              "duration": 4090
+            }
+          ]
+        },
+        {
+          "episode": 6,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894714,
+              "duration": 3913
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 710917,
+              "duration": 3913
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 710915,
+              "duration": 3913
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 709701,
+              "duration": 3765
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 737251,
+              "duration": 3913
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 709745,
+              "duration": 3702
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 697769,
+              "duration": 3954
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 711726,
+              "duration": 3913
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737273,
+              "duration": 3912
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737257,
+              "duration": 3914
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 694554,
+              "duration": 3913
+            }
+          ]
+        },
+        {
+          "episode": 7,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894715,
+              "duration": 3895
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2099107,
+              "duration": 3895
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 712899,
+              "duration": 3894
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 711593,
+              "duration": 3745
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 740147,
+              "duration": 3894
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 711699,
+              "duration": 3894
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 711509,
+              "duration": 3936
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 711727,
+              "duration": 3894
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737274,
+              "duration": 3894
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737258,
+              "duration": 3916
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 711198,
+              "duration": 3894
+            }
+          ]
+        },
+        {
+          "episode": 8,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1894716,
+              "duration": 4093
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 727252,
+              "duration": 4093
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 727253,
+              "duration": 4093
+            },
+            {
+              "voice_id": 8,
+              "voice_name": "NewStudio",
+              "video_id": 723686,
+              "duration": 3946
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 740171,
+              "duration": 4093
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 724539,
+              "duration": 4093
+            },
+            {
+              "voice_id": 120,
+              "voice_name": "HDrezka Studio",
+              "video_id": 816364,
+              "duration": 4093
+            },
+            {
+              "voice_id": 11,
+              "voice_name": "Jaskier",
+              "video_id": 724427,
+              "duration": 4093
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 737275,
+              "duration": 4092
+            },
+            {
+              "voice_id": 360,
+              "voice_name": "Dzuski.com (UA)",
+              "video_id": 737259,
+              "duration": 4094
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 722141,
+              "duration": 4093
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "season": 5,
+      "episodes": [
+        {
+          "episode": 1,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1964034,
+              "duration": 3824
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 1954469,
+              "duration": 3833
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 1952051,
+              "duration": 3834
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 2018942,
+              "duration": 3824
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 1951874,
+              "duration": 3824
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 1938623,
+              "duration": 3834
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 1936008,
+              "duration": 3848
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 1935979,
+              "duration": 3895
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 1934352,
+              "duration": 3896
+            },
+            {
+              "voice_id": 358,
+              "voice_name": "Цікава Ідея (UA)",
+              "video_id": 1951504,
+              "duration": 3824
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 1933837,
+              "duration": 3824
+            }
+          ]
+        },
+        {
+          "episode": 2,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 1983828,
+              "duration": 3753
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 1965596,
+              "duration": 3762
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 1983516,
+              "duration": 3762
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 2018943,
+              "duration": 3753
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 1953668,
+              "duration": 3753
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 1938624,
+              "duration": 3762
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 1936378,
+              "duration": 3777
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 1935980,
+              "duration": 3821
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 1934699,
+              "duration": 3599
+            },
+            {
+              "voice_id": 358,
+              "voice_name": "Цікава Ідея (UA)",
+              "video_id": 1951505,
+              "duration": 3753
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 1933862,
+              "duration": 3753
+            }
+          ]
+        },
+        {
+          "episode": 3,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 2005254,
+              "duration": 3947
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 1993981,
+              "duration": 3956
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2005295,
+              "duration": 3947
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 2018944,
+              "duration": 3947
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 2007110,
+              "duration": 3925
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 1978203,
+              "duration": 3956
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 1976278,
+              "duration": 3971
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 1975858,
+              "duration": 4016
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 1973984,
+              "duration": 4011
+            },
+            {
+              "voice_id": 358,
+              "voice_name": "Цікава Ідея (UA)",
+              "video_id": 2130972,
+              "duration": 3947
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 1973417,
+              "duration": 3947
+            }
+          ]
+        },
+        {
+          "episode": 4,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 2040701,
+              "duration": 3948
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2032205,
+              "duration": 3958
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2042216,
+              "duration": 3958
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 2099065,
+              "duration": 3948
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 2028639,
+              "duration": 3948
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 2015199,
+              "duration": 3958
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 2012809,
+              "duration": 3973
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 2012657,
+              "duration": 4013
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 2011224,
+              "duration": 4012
+            },
+            {
+              "voice_id": 358,
+              "voice_name": "Цікава Ідея (UA)",
+              "video_id": 2130973,
+              "duration": 3949
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 2010858,
+              "duration": 3948
+            }
+          ]
+        },
+        {
+          "episode": 5,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 2092726,
+              "duration": 4112
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2073650,
+              "duration": 4121
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2077724,
+              "duration": 4122
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 2160620,
+              "duration": 4112
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 2117017,
+              "duration": 4112
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 2055186,
+              "duration": 4122
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 2053125,
+              "duration": 4136
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 2052469,
+              "duration": 4180
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 2051463,
+              "duration": 4165
+            },
+            {
+              "voice_id": 358,
+              "voice_name": "Цікава Ідея (UA)",
+              "video_id": 2130974,
+              "duration": 4112
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 2051223,
+              "duration": 4112
+            }
+          ]
+        },
+        {
+          "episode": 6,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 2120403,
+              "duration": 3887
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2110699,
+              "duration": 3896
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2127687,
+              "duration": 3897
+            },
+            {
+              "voice_id": 15,
+              "voice_name": "AlexFilm",
+              "video_id": 2160621,
+              "duration": 3887
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 2108072,
+              "duration": 3887
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 2095276,
+              "duration": 3897
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 2092871,
+              "duration": 3911
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 2090856,
+              "duration": 3936
+            },
+            {
+              "voice_id": 358,
+              "voice_name": "Цікава Ідея (UA)",
+              "video_id": 2130975,
+              "duration": 3887
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 2090460,
+              "duration": 3887
+            }
+          ]
+        },
+        {
+          "episode": 7,
+          "voices": [
+            {
+              "voice_id": 679,
+              "voice_name": "Red Head Sound (Дубляж)",
+              "video_id": 2157685,
+              "duration": 4211
+            },
+            {
+              "voice_id": 6,
+              "voice_name": "LostFilm",
+              "video_id": 2149825,
+              "duration": 4220
+            },
+            {
+              "voice_id": 10,
+              "voice_name": "Кубик в Кубе",
+              "video_id": 2165991,
+              "duration": 4221
+            },
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 2151554,
+              "duration": 4211
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 2134144,
+              "duration": 4221
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 2131592,
+              "duration": 4235
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 2131601,
+              "duration": 4277
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 2130000,
+              "duration": 4282
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 2129811,
+              "duration": 4211
+            }
+          ]
+        },
+        {
+          "episode": 8,
+          "voices": [
+            {
+              "voice_id": 152,
+              "voice_name": "TVShows",
+              "video_id": 2186939,
+              "duration": 4006
+            },
+            {
+              "voice_id": 795,
+              "voice_name": "HDRezka Studio 18+",
+              "video_id": 2173623,
+              "duration": 4016
+            },
+            {
+              "voice_id": 400,
+              "voice_name": "LE-Production",
+              "video_id": 2171091,
+              "duration": 4030
+            },
+            {
+              "voice_id": 485,
+              "voice_name": "RuDub",
+              "video_id": 2170869,
+              "duration": 4092
+            },
+            {
+              "voice_id": 4,
+              "voice_name": "ColdFilm",
+              "video_id": 2168746,
+              "duration": 4060
+            },
+            {
+              "voice_id": 2,
+              "voice_name": "Субтитры",
+              "video_id": 2168426,
+              "duration": 4006
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
