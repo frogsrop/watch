@@ -283,7 +283,9 @@
     // Если в эпизоде есть провайдеры (kinomix-агрегатор) — показываем row "Плеер"
     // и фильтруем голоса. Иначе row скрыт и показываем все голоса как раньше.
     const providers = distinctProviders(allVoices);
-    const hasProvider = providers.length > 0;
+    // Row показываем только если есть ИЗ ЧЕГО выбирать (≥2 провайдеров).
+    // Если 1 — нет смысла, фильтрация всё равно не меняет список голосов.
+    const hasProvider = providers.length > 1;
     rowProvider.hidden = !hasProvider;
     let voiceList = allVoices;
     if (hasProvider) {
