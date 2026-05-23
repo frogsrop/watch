@@ -485,11 +485,19 @@ async function captureFromKinogo(
       await page.waitForTimeout(800);
       // активация iframe может срабатывать поздно (lazyload), повторяем
       await activateLazyIframes(page);
-      const cinemar = page.frames().find((f) => /cinemar|cinemap/.test(f.url()));
-      if (!cinemar) continue;
-      const caps = (await cinemar
-        .evaluate(() => (window as unknown as { __capturedPlaylists?: unknown[][] }).__capturedPlaylists ?? [])
-        .catch(() => [])) as RawPlaylistEntry[][];
+      // playerjs-эмбеды от разных провайдеров: cinemar/cinemap (kinogo),
+      // plplayer/kalarona (theboys.fun), а также бывают i-trailer.ru, lv9-vid.
+      const playerFrames = page.frames().filter((f) =>
+        /cinemar|cinemap|plplayer|kalarona|i-trailer\.ru/.test(f.url()),
+      );
+      if (playerFrames.length === 0) continue;
+      const caps: RawPlaylistEntry[][] = [];
+      for (const pf of playerFrames) {
+        const c = (await pf
+          .evaluate(() => (window as unknown as { __capturedPlaylists?: unknown[][] }).__capturedPlaylists ?? [])
+          .catch(() => [])) as RawPlaylistEntry[][];
+        caps.push(...c);
+      }
       if (caps.length > 0) {
         playlist = structureFromCaptured(caps);
         if (playlist.seasons.length > 0) {
@@ -561,9 +569,10 @@ function matchVoice(episode: EpisodeInfo, selector?: string): VoiceInfo | null {
   return episode.voices[0] ?? null;
 }
 
-export function detectSource(url: string): 'kinogo' | 'lordfilm' | null {
+export function detectSource(url: string): 'kinogo' | 'lordfilm' | 'theboys' | null {
   if (/lordfilm/i.test(url)) return 'lordfilm';
   if (/kinogo/i.test(url)) return 'kinogo';
+  if (/theboys\.fun/i.test(url)) return 'theboys';
   return null;
 }
 
@@ -574,7 +583,12 @@ export async function extractM3U8(
   const source = detectSource(pageUrl);
   if (!source) throw new ExtractorError('unsupported source url', 'playlist');
   const capture = source === 'lordfilm' ? captureFromLordfilm : captureFromKinogo;
-  const referer = source === 'lordfilm' ? 'https://api.femd.ws/' : 'https://cinemar.cc/';
+  const referer =
+    source === 'lordfilm'
+      ? 'https://api.femd.ws/'
+      : source === 'theboys'
+        ? 'https://www.theboys.fun/'
+        : 'https://cinemar.cc/';
 
   const { playlist, cookies } = await capture(pageUrl, opts.timeoutMs ?? 45_000);
 

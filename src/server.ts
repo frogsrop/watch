@@ -75,12 +75,12 @@ function gcProbeCache() {
 }
 
 function validateSourceUrl(url: string): boolean {
-  return /^https?:\/\/[^\s]+(kinogo|lordfilm)[^\s]+$/i.test(url);
+  return /^https?:\/\/[^\s]+(kinogo|lordfilm|theboys\.fun)[^\s]+$/i.test(url);
 }
 
 fastify.post<{ Body: { url: string } }>(`${BASE_PATH}/api/probe`, async (req, reply) => {
   const url = String(req.body?.url ?? '').trim();
-  if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm only)' });
+  if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm|theboys.fun)' });
 
   gcProbeCache();
   const cached = probeCache.get(url);
@@ -163,7 +163,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
   `${BASE_PATH}/api/extract`,
   async (req, reply) => {
     const url = String(req.body?.url ?? '').trim();
-    if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm only)' });
+    if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm|theboys.fun)' });
     const season = req.body?.season?.trim() || undefined;
     const episode = req.body?.episode?.trim() || undefined;
     const voice = req.body?.voice?.trim() || undefined;
