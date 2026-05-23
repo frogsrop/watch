@@ -606,6 +606,7 @@ interface KinomixCacheEntry {
   videoseed_iframe?: string;
   vibix_available?: boolean;
   title?: string | null;
+  updated_at?: string;
 }
 interface KinomixCache {
   source: string;
@@ -614,6 +615,7 @@ interface KinomixCache {
 
 const kinomixCacheMem = new Map<string, KinomixCacheEntry>();
 let kinomixCacheLoaded = false;
+let kinomixCachePath: string | null = null;
 async function loadKinomixCache(): Promise<void> {
   if (kinomixCacheLoaded) return;
   try {
@@ -630,15 +632,113 @@ async function loadKinomixCache(): Promise<void> {
         const raw = await readFile(p, 'utf-8');
         const data = JSON.parse(raw) as KinomixCache;
         for (const [k, v] of Object.entries(data.entries ?? {})) kinomixCacheMem.set(k, v);
+        kinomixCachePath = p;
         break;
       } catch {
         /* try next */
       }
     }
+    // Если файла нет — выбираем первый кандидат для будущих записей.
+    if (!kinomixCachePath) kinomixCachePath = candidates[0] ?? null;
   } catch {
     /* ignore */
   }
   kinomixCacheLoaded = true;
+}
+
+let kinomixPersistInFlight: Promise<void> | null = null;
+async function persistKinomixCache(): Promise<void> {
+  if (!kinomixCachePath) return;
+  // Гасим конкурентные writes — последний выигрывает.
+  if (kinomixPersistInFlight) return kinomixPersistInFlight;
+  kinomixPersistInFlight = (async () => {
+    const path = kinomixCachePath!;
+    try {
+      const { writeFile, rename, mkdir } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+      await mkdir(dirname(path), { recursive: true }).catch(() => {});
+      const entries: Record<string, KinomixCacheEntry> = {};
+      for (const [k, v] of kinomixCacheMem) entries[k] = v;
+      const data: KinomixCache = { source: 'kinomix.web.app', entries };
+      const json = JSON.stringify(data, null, 2);
+      const tmp = path + '.tmp';
+      await writeFile(tmp, json, 'utf-8');
+      await rename(tmp, path);
+      dbg(`kinomix cache persisted to ${path} (${kinomixCacheMem.size} entries)`);
+    } catch (e) {
+      dbg(`kinomix cache persist failed: ${(e as Error).message}`);
+    } finally {
+      kinomixPersistInFlight = null;
+    }
+  })();
+  return kinomixPersistInFlight;
+}
+
+/**
+ * Server-side crawl: загружаем kinomix.web.app в shared Playwright (TLS-fingerprint
+ * проходит из реального Chrome), вызываем kinobox API через page.evaluate,
+ * парсим провайдеров, сохраняем в memory + best-effort на disk. Используется
+ * captureFromKinomix() при кеш-miss'е чтобы избежать ручного crawl-kinomix.mjs.
+ */
+async function crawlKinomixOnServer(kpId: number): Promise<KinomixCacheEntry | null> {
+  const context = await newContext();
+  try {
+    const page = await context.newPage();
+    await page.goto('https://kinomix.web.app/', { waitUntil: 'domcontentloaded', timeout: 25_000 });
+    await page.waitForTimeout(1500);
+    const json = await page.evaluate(async (id: number) => {
+      const r = await fetch(`https://api.kinobox.tv/api/players?kinopoisk=${id}`, { credentials: 'omit' });
+      if (!r.ok) throw new Error(`kinobox HTTP ${r.status}`);
+      return r.json();
+    }, kpId);
+
+    const entry: KinomixCacheEntry = {
+      kinopoisk_id: kpId,
+      title: null,
+      updated_at: new Date().toISOString(),
+    };
+
+    type KinoboxProvider = { type: string; iframeUrl?: string };
+    const providers = ((json as { data?: KinoboxProvider[] }).data) ?? [];
+
+    const collaps = providers.find((p) => p.type === 'Collaps');
+    if (collaps?.iframeUrl) {
+      const m = collaps.iframeUrl.match(/api\.ortified\.ws\/embed\/movie\/(\d+)/);
+      if (m && m[1]) entry.ortified_id = Number(m[1]);
+    }
+
+    const flixcdn = providers.find((p) => p.type === 'Flixcdn');
+    if (flixcdn?.iframeUrl) {
+      try {
+        const flixPage = await context.newPage();
+        await flixPage.goto(flixcdn.iframeUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+        type Payload = { id: number; is_serial: boolean; seasons_episodes?: Record<string, number[]>; episodes?: number[]; translations?: { id: number; title: string }[] };
+        const payload = await flixPage.evaluate(() => (window as unknown as { __PLAYER_PAYLOAD__?: Payload }).__PLAYER_PAYLOAD__ ?? null);
+        await flixPage.close().catch(() => {});
+        if (payload) {
+          entry.flixcdn = {
+            show_id: payload.id,
+            is_serial: !!payload.is_serial,
+            seasons_episodes: payload.seasons_episodes ?? (payload.episodes ? { '1': payload.episodes } : {}),
+            translations: (payload.translations ?? []).map((t) => ({ id: t.id, title: t.title })),
+          };
+        }
+      } catch (e) {
+        dbg(`kinomix crawl: flixcdn payload error: ${(e as Error).message}`);
+      }
+    }
+
+    const videoseed = providers.find((p) => p.type === 'Videoseed');
+    if (videoseed?.iframeUrl) entry.videoseed_iframe = videoseed.iframeUrl;
+
+    const vibix = providers.find((p) => p.type === 'Vibix');
+    if (vibix?.iframeUrl) entry.vibix_available = true;
+
+    if (!entry.ortified_id && !entry.flixcdn && !entry.videoseed_iframe && !entry.vibix_available) return null;
+    return entry;
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 function parseKinomixUrl(pageUrl: string): { kinopoisk_id: number } | null {
@@ -975,10 +1075,25 @@ async function captureFromKinomix(pageUrl: string): Promise<{
   const parsed = parseKinomixUrl(pageUrl);
   if (!parsed) throw new ExtractorError(`не парсится kinomix URL: ${pageUrl}`, 'playlist');
   await loadKinomixCache();
-  const entry = kinomixCacheMem.get(String(parsed.kinopoisk_id));
+  const key = String(parsed.kinopoisk_id);
+  let entry = kinomixCacheMem.get(key);
+  if (!entry) {
+    dbg(`kinomix: kp=${parsed.kinopoisk_id} нет в кеше, server-side crawl`);
+    try {
+      const fresh = await crawlKinomixOnServer(parsed.kinopoisk_id);
+      if (fresh) {
+        kinomixCacheMem.set(key, fresh);
+        void persistKinomixCache();
+        entry = fresh;
+        dbg(`kinomix: crawl OK для kp=${parsed.kinopoisk_id}`);
+      }
+    } catch (e) {
+      dbg(`kinomix: crawl FAILED: ${(e as Error).message}`);
+    }
+  }
   if (!entry) {
     throw new ExtractorError(
-      `kinopoisk_id=${parsed.kinopoisk_id} нет в кеше — запусти scripts/crawl-kinomix.mjs ${parsed.kinopoisk_id} локально`,
+      `kinopoisk_id=${parsed.kinopoisk_id}: kinobox не отдал данных (фильм/сериал не найден или kinomix.web.app недоступен)`,
       'playlist',
     );
   }

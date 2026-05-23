@@ -120,7 +120,52 @@
       },
       "videoseed_iframe": "https://tv-1-kinoserial.net/embed_serial/913/?token=a82f44b1b020395e7677d9c9132116d6",
       "vibix_available": true
+    },
+    "5330764": {
+      "kinopoisk_id": 5330764,
+      "title": null,
+      "updated_at": "2026-05-23T22:47:18.470Z",
+      "ortified_id": 66464,
+      "flixcdn": {
+        "show_id": 111747,
+        "is_serial": false,
+        "seasons_episodes": {},
+        "translations": [
+          {
+            "id": 602,
+            "title": "Любительский (многоголосый закадровый) (AniBaza)"
+          },
+          {
+            "id": 510,
+            "title": "Любительский (многоголосый закадровый) (AniStar)"
+          },
+          {
+            "id": 1575,
+            "title": "Любительский (многоголосый закадровый) (SHIZA Project)"
+          },
+          {
+            "id": 2497,
+            "title": "Любительский (многоголосый закадровый) (DreamCast)"
+          },
+          {
+            "id": 601,
+            "title": "Любительский (многоголосый закадровый) (AniLibria.TV)"
+          },
+          {
+            "id": 594,
+            "title": "Любительский (многоголосый закадровый) (AniDUB)"
+          },
+          {
+            "id": 447,
+            "title": "Любительский (двухголосый закадровый) (Takeover Project)"
+          },
+          {
+            "id": 2506,
+            "title": "Полное дублирование (Wakanim)"
+          }
+        ]
+      }
     }
   },
-  "updated_at": "2026-05-23T22:14:24.944Z"
+  "updated_at": "2026-05-23T22:47:19.999Z"
 }
