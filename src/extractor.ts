@@ -812,16 +812,24 @@ async function fetchVideoseedRawMap(iframeUrl: string): Promise<Map<string, stri
         await route.continue();
       } catch { try { await route.continue(); } catch {} }
     });
+    // Videoseed иногда отдаёт redirect/503 на первый запрос. Принимаем только
+    // response который реально содержит маркер Playerjs("#2..."), пропуская мусор.
     let captured: string | null = null;
     page.on('response', async (res) => {
-      if (res.url() === iframeUrl && !captured) { try { captured = await res.text(); } catch {} }
+      if (captured) return;
+      if (res.url() !== iframeUrl) return;
+      try {
+        const text = await res.text();
+        if (/new Playerjs\("#2/.test(text)) captured = text;
+      } catch {}
     });
     await page.goto(wrapperUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
     if (!captured) {
-      try { await page.waitForResponse((r) => r.url() === iframeUrl, { timeout: 15_000 }); } catch {}
-      if (!captured) await page.waitForTimeout(1500);
+      // Ждём появления валидного response до 15 сек (с retry внутри страницы).
+      const deadline = Date.now() + 15_000;
+      while (!captured && Date.now() < deadline) await page.waitForTimeout(500);
     }
-    if (!captured) throw new Error('videoseed: не перехватили iframe response');
+    if (!captured) throw new Error('videoseed: не перехватили валидный Playerjs response');
     const m = (captured as string).match(/new Playerjs\("([^"]+)"\)/);
     if (!m || !m[1]) throw new Error('videoseed: Playerjs(...) не найден');
     const s = m[1].substring(2).replace(/\|\|\|[^=|]+==/g, '');
@@ -869,104 +877,80 @@ export async function resolveVideoseedMarker(marker: string): Promise<string | n
   }
 }
 
-async function captureFromVideoseed(iframeUrl: string): Promise<PlayerStructure> {
-  const context = await newContext();
+/**
+ * HEAD-check c таймаутом. Возвращает true если URL отвечает 2xx/3xx.
+ * Используется для отсева мёртвых стримов (например когда у Videoseed конкретный
+ * voice physically removed at the CDN — 404 даже на свежий signed URL).
+ */
+async function headCheck(url: string, timeoutMs = 4000, referer?: string): Promise<boolean> {
   try {
-    const page = await context.newPage();
-    // Прямой page.goto(iframeUrl) триггерит anti-bot: Videoseed ловит
-    // Sec-Fetch-Dest: document. Воркэраунд (как у lampac): грузим wrapper-HTML
-    // на хосте videoseed.tv (route-fulfill), внутри iframe = настоящий embed —
-    // он загружается с Sec-Fetch-Dest: iframe + Referer: videoseed.tv.
-    const wrapperUrl = 'https://videoseed.tv/__watch_wrapper__';
-    await page.route('**/*', async (route) => {
-      try {
-        const url = route.request().url();
-        if (url === wrapperUrl) {
-          await route.fulfill({
-            status: 200,
-            contentType: 'text/html',
-            body: `<!doctype html><html><body style="margin:0"><iframe src="${iframeUrl.replace(/"/g, '&quot;')}" style="width:100vw;height:100vh;border:0"></iframe></body></html>`,
-          });
-          return;
-        }
-        await route.continue();
-      } catch {
-        try { await route.continue(); } catch {}
-      }
-    });
-    let captured: string | null = null;
-    page.on('response', async (res) => {
-      if (res.url() === iframeUrl && !captured) {
-        try { captured = await res.text(); } catch {}
-      }
-    });
-    await page.goto(wrapperUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
-    if (!captured) {
-      try { await page.waitForResponse((r) => r.url() === iframeUrl, { timeout: 15_000 }); } catch {}
-      if (!captured) await page.waitForTimeout(1500);
-    }
-    if (!captured) throw new ExtractorError('videoseed: не перехватили iframe response', 'playlist');
-
-    const m = (captured as string).match(/new Playerjs\("([^"]+)"\)/);
-    if (!m || !m[1]) throw new ExtractorError('videoseed: Playerjs("...") не найден', 'playlist');
-    // Strip leading `#2`, strip `|||...==` watermarks, base64-decode.
-    let s = m[1].substring(2).replace(/\|\|\|[^=|]+==/g, '');
-    let json: string;
-    try {
-      json = Buffer.from(s, 'base64').toString('utf-8');
-    } catch (e) {
-      throw new ExtractorError(`videoseed: base64 decode failed: ${(e as Error).message}`, 'playlist');
-    }
-    let root: { file?: unknown };
-    try {
-      root = JSON.parse(json);
-    } catch {
-      throw new ExtractorError('videoseed: decoded body не JSON', 'playlist');
-    }
-
-    // Парсим голоса и возвращаем metadata (без URL'ов) — URL'ы будут резолвиться
-    // late через маркер. Это нужно потому что storage.videoseedcdn.com URLs имеют
-    // TTL ~30 мин и протухают до конца просмотра.
-    const parseVoiceTitles = (str: string): string[] => {
-      const titles: string[] = [];
-      for (const part of String(str).split(';')) {
-        const vm = part.trim().match(/^\{([^}]+)\}\s*(https?:\/\/\S+\.m3u8\S*)/);
-        if (vm && vm[1]) titles.push(vm[1].trim());
-      }
-      return titles;
-    };
-
-    const seasons: SeasonInfo[] = [];
-    const fileNode = root.file;
-    if (Array.isArray(fileNode)) {
-      for (const s of fileNode as Array<{ title?: string; folder?: Array<{ id?: string; title?: string; file?: string }> }>) {
-        const sNumMatch = String(s.title ?? '').match(/(\d+)/);
-        const sId = sNumMatch && sNumMatch[1] ? sNumMatch[1] : String(seasons.length + 1);
-        const episodes: EpisodeInfo[] = [];
-        for (const e of s.folder ?? []) {
-          const eNumMatch = String(e.title ?? e.id ?? '').match(/(\d+)/);
-          const eId = eNumMatch && eNumMatch[1] ? eNumMatch[1] : String(episodes.length + 1);
-          const voices: VoiceInfo[] = parseVoiceTitles(e.file ?? '').map((title) => ({
-            title,
-            file: buildVideoseedMarker(iframeUrl, sId, eId, title),
-          }));
-          if (voices.length) episodes.push({ id: eId, title: `Серия ${eId}`, voices });
-        }
-        if (episodes.length) seasons.push({ id: sId, title: `Сезон ${sId}`, episodes });
-      }
-    } else if (typeof fileNode === 'string') {
-      const voices: VoiceInfo[] = parseVoiceTitles(fileNode).map((title) => ({
-        title,
-        file: buildVideoseedMarker(iframeUrl, 'film', 'film', title),
-      }));
-      if (voices.length) {
-        seasons.push({ id: 'film', title: 'Фильм', episodes: [{ id: 'film', title: '1', voices }] });
-      }
-    }
-    return { seasons };
-  } finally {
-    await context.close().catch(() => {});
+    const { request } = await import('undici');
+    const headers: Record<string, string> = { 'user-agent': UA };
+    if (referer) headers.referer = referer;
+    const res = await request(url, { method: 'HEAD', headers, headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+    return res.statusCode >= 200 && res.statusCode < 400;
+  } catch {
+    return false;
   }
+}
+
+async function captureFromVideoseed(iframeUrl: string): Promise<PlayerStructure> {
+  // Достаём весь (season, episode, voice) → m3u8 map. Это та же функция что
+  // и resolver'у нужна, кешируется на 4 мин — DRY.
+  const map = await fetchVideoseedRawMap(iframeUrl);
+  if (map.size === 0) throw new ExtractorError('videoseed: пустой playlist', 'playlist');
+
+  // По одному URL'у на каждое уникальное имя голоса (первое попавшееся).
+  // Видосеед обычно паковка per-voice сквозная по всем эпизодам — если voice X
+  // мёртвый в одном эпизоде, он мёртвый везде. Hence — HEAD на первом семпле.
+  const sampleByVoice = new Map<string, string>();
+  for (const [key, url] of map) {
+    const voice = key.split('|')[2];
+    if (voice && !sampleByVoice.has(voice)) sampleByVoice.set(voice, url);
+  }
+  const headResults = await Promise.all(
+    [...sampleByVoice.entries()].map(async ([voice, url]) => {
+      const ok = await headCheck(url, 4000, 'https://videoseed.tv/');
+      return [voice, ok] as const;
+    }),
+  );
+  const aliveVoices = new Set(headResults.filter(([, ok]) => ok).map(([v]) => v));
+  const dead = headResults.filter(([, ok]) => !ok).map(([v]) => v);
+  if (dead.length) dbg(`videoseed: dropped dead voices: ${dead.join(', ')}`);
+  if (aliveVoices.size === 0) throw new ExtractorError('videoseed: ни один голос не доступен', 'playlist');
+
+  // Собираем PlayerStructure из map, оставляя только живые голоса.
+  // Episode-keys сохраняем в порядке появления в map (Map итерируется по порядку
+  // вставки, а fetchVideoseedRawMap кладёт по порядку парсинга = source-order).
+  const episodeMap = new Map<string, { season: string; episode: string; voices: VoiceInfo[] }>();
+  for (const [key] of map) {
+    const parts = key.split('|');
+    if (parts.length !== 3) continue;
+    const [season, episode, voice] = parts as [string, string, string];
+    if (!aliveVoices.has(voice)) continue;
+    const epKey = `${season}|${episode}`;
+    if (!episodeMap.has(epKey)) episodeMap.set(epKey, { season, episode, voices: [] });
+    episodeMap.get(epKey)!.voices.push({
+      title: voice,
+      file: buildVideoseedMarker(iframeUrl, season, episode, voice),
+    });
+  }
+  const seasonMap = new Map<string, SeasonInfo>();
+  for (const ep of episodeMap.values()) {
+    if (!seasonMap.has(ep.season)) {
+      seasonMap.set(ep.season, {
+        id: ep.season,
+        title: ep.season === 'film' ? 'Фильм' : `Сезон ${ep.season}`,
+        episodes: [],
+      });
+    }
+    seasonMap.get(ep.season)!.episodes.push({
+      id: ep.episode,
+      title: ep.episode === 'film' ? '1' : `Серия ${ep.episode}`,
+      voices: ep.voices,
+    });
+  }
+  return { seasons: [...seasonMap.values()] };
 }
 
 /**
