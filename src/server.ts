@@ -11,6 +11,7 @@ import {
   closeBrowser,
   ExtractorError,
   resolveFlixcdnVoice,
+  resolveVideoseedMarker,
   type PlayerStructure,
   type ExtractResult,
 } from './extractor.js';
@@ -335,7 +336,7 @@ fastify.get<{ Params: { roomId: string } }>(`${BASE_PATH}/hls/:roomId/index.m3u8
   const room = rooms.get(req.params.roomId);
   if (!room) return reply.code(404).send('room not found');
   try {
-    // Резолвим late-binding маркеры (kalarona/flixcdn) в живой m3u8 URL
+    // Резолвим late-binding маркеры (kalarona/flixcdn/videoseed) в живой m3u8 URL
     let voiceFile = room.current.voiceFile;
     if (voiceFile.startsWith('kalarona-resolve:')) {
       const resolved = await resolveKalaronaVoice(voiceFile, room.session);
@@ -344,6 +345,10 @@ fastify.get<{ Params: { roomId: string } }>(`${BASE_PATH}/hls/:roomId/index.m3u8
     } else if (voiceFile.startsWith('flixcdn-resolve:')) {
       const resolved = await resolveFlixcdn(voiceFile);
       if (!resolved) return reply.code(502).send('flixcdn resolve failed');
+      voiceFile = resolved;
+    } else if (voiceFile.startsWith('videoseed-resolve:')) {
+      const resolved = await resolveVideoseedMarker(voiceFile);
+      if (!resolved) return reply.code(502).send('videoseed resolve failed');
       voiceFile = resolved;
     }
     const upstream = await fetchUpstream(voiceFile, room.session);

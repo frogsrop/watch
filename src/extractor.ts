@@ -760,7 +760,115 @@ function parseKinomixUrl(pageUrl: string): { kinopoisk_id: number } | null {
  * https://videoseed.tv/, перехватываем response, парсим Playerjs("#2<base64>"),
  * стрипаем #2 и |||...== маркеры, base64-decode → JSON. Voices в каждом
  * эпизоде — строка вида "{voice} url.m3u8;{voice} url.m3u8;...".
+ *
+ * Возвращает структуру с **maркерами** вместо direct URLs (`videoseed-resolve:`),
+ * потому что URLs storage.videoseedcdn.com имеют короткий TTL (~30 мин) —
+ * прямое использование сломалось бы в середине просмотра. Resolver в server.ts
+ * пере-извлекает iframe (с memoize-кешем) и резолвит маркер в свежий URL.
  */
+function buildVideoseedMarker(iframeUrl: string, season: string, episode: string, voice: string): string {
+  const b64 = (s: string) => Buffer.from(s, 'utf-8').toString('base64url');
+  return `videoseed-resolve:${b64(iframeUrl)}|${b64(season)}|${b64(episode)}|${b64(voice)}`;
+}
+
+export function parseVideoseedMarker(marker: string): { iframeUrl: string; season: string; episode: string; voice: string } | null {
+  const m = marker.match(/^videoseed-resolve:([^|]+)\|([^|]+)\|([^|]+)\|(.+)$/);
+  if (!m) return null;
+  const dec = (s: string) => Buffer.from(s, 'base64url').toString('utf-8');
+  return { iframeUrl: dec(m[1]!), season: dec(m[2]!), episode: dec(m[3]!), voice: dec(m[4]!) };
+}
+
+/**
+ * Возвращает сырое (season, episode, voice) → m3u8 mapping из Videoseed iframe.
+ * Используется resolver'ом при поступлении videoseed-resolve маркера. Memoize
+ * на 4 минуты — короче чем CDN URL TTL (~30 мин) с большим запасом, но достаточно
+ * чтобы переключение voice/episode в комнате не дёргало Playwright каждый раз.
+ */
+interface VideoseedResolveMap {
+  // key: `${season}|${episode}|${voiceTitle}` → m3u8 URL
+  map: Map<string, string>;
+  at: number;
+}
+const videoseedRawCache = new Map<string, VideoseedResolveMap>();
+const VIDEOSEED_RAW_TTL_MS = 4 * 60 * 1000;
+
+async function fetchVideoseedRawMap(iframeUrl: string): Promise<Map<string, string>> {
+  const cached = videoseedRawCache.get(iframeUrl);
+  if (cached && Date.now() - cached.at < VIDEOSEED_RAW_TTL_MS) return cached.map;
+  const context = await newContext();
+  try {
+    const page = await context.newPage();
+    const wrapperUrl = 'https://videoseed.tv/__watch_wrapper__';
+    await page.route('**/*', async (route) => {
+      try {
+        const url = route.request().url();
+        if (url === wrapperUrl) {
+          await route.fulfill({
+            status: 200, contentType: 'text/html',
+            body: `<!doctype html><html><body style="margin:0"><iframe src="${iframeUrl.replace(/"/g, '&quot;')}" style="width:100vw;height:100vh;border:0"></iframe></body></html>`,
+          });
+          return;
+        }
+        await route.continue();
+      } catch { try { await route.continue(); } catch {} }
+    });
+    let captured: string | null = null;
+    page.on('response', async (res) => {
+      if (res.url() === iframeUrl && !captured) { try { captured = await res.text(); } catch {} }
+    });
+    await page.goto(wrapperUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
+    if (!captured) {
+      try { await page.waitForResponse((r) => r.url() === iframeUrl, { timeout: 15_000 }); } catch {}
+      if (!captured) await page.waitForTimeout(1500);
+    }
+    if (!captured) throw new Error('videoseed: не перехватили iframe response');
+    const m = (captured as string).match(/new Playerjs\("([^"]+)"\)/);
+    if (!m || !m[1]) throw new Error('videoseed: Playerjs(...) не найден');
+    const s = m[1].substring(2).replace(/\|\|\|[^=|]+==/g, '');
+    const json = Buffer.from(s, 'base64').toString('utf-8');
+    const root = JSON.parse(json) as { file?: unknown };
+    const out = new Map<string, string>();
+    const addVoices = (fileStr: string, season: string, episode: string) => {
+      for (const part of String(fileStr).split(';')) {
+        const vm = part.trim().match(/^\{([^}]+)\}\s*(https?:\/\/\S+\.m3u8\S*)/);
+        if (vm && vm[1] && vm[2]) out.set(`${season}|${episode}|${vm[1].trim()}`, vm[2].trim());
+      }
+    };
+    if (Array.isArray(root.file)) {
+      for (const s of root.file as Array<{ title?: string; folder?: Array<{ title?: string; id?: string; file?: string }> }>) {
+        const sId = String(s.title ?? '').match(/(\d+)/)?.[1] ?? '1';
+        for (const e of s.folder ?? []) {
+          const eId = String(e.title ?? e.id ?? '').match(/(\d+)/)?.[1] ?? '1';
+          addVoices(e.file ?? '', sId, eId);
+        }
+      }
+    } else if (typeof root.file === 'string') {
+      addVoices(root.file, 'film', 'film');
+    }
+    videoseedRawCache.set(iframeUrl, { map: out, at: Date.now() });
+    return out;
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+export async function resolveVideoseedMarker(marker: string): Promise<string | null> {
+  const parsed = parseVideoseedMarker(marker);
+  if (!parsed) return null;
+  try {
+    const map = await fetchVideoseedRawMap(parsed.iframeUrl);
+    const url = map.get(`${parsed.season}|${parsed.episode}|${parsed.voice}`);
+    if (!url) {
+      dbg(`videoseed resolve: no match for ${parsed.season}|${parsed.episode}|${parsed.voice}`);
+      return null;
+    }
+    return url;
+  } catch (e) {
+    dbg(`videoseed resolve failed: ${(e as Error).message}`);
+    return null;
+  }
+}
+
 async function captureFromVideoseed(iframeUrl: string): Promise<PlayerStructure> {
   const context = await newContext();
   try {
@@ -816,19 +924,21 @@ async function captureFromVideoseed(iframeUrl: string): Promise<PlayerStructure>
       throw new ExtractorError('videoseed: decoded body не JSON', 'playlist');
     }
 
-    const parseVoices = (str: string): VoiceInfo[] => {
-      const voices: VoiceInfo[] = [];
+    // Парсим голоса и возвращаем metadata (без URL'ов) — URL'ы будут резолвиться
+    // late через маркер. Это нужно потому что storage.videoseedcdn.com URLs имеют
+    // TTL ~30 мин и протухают до конца просмотра.
+    const parseVoiceTitles = (str: string): string[] => {
+      const titles: string[] = [];
       for (const part of String(str).split(';')) {
         const vm = part.trim().match(/^\{([^}]+)\}\s*(https?:\/\/\S+\.m3u8\S*)/);
-        if (vm && vm[1] && vm[2]) voices.push({ title: vm[1].trim(), file: vm[2].trim() });
+        if (vm && vm[1]) titles.push(vm[1].trim());
       }
-      return voices;
+      return titles;
     };
 
     const seasons: SeasonInfo[] = [];
     const fileNode = root.file;
     if (Array.isArray(fileNode)) {
-      // Сериал: file = [{title:"1 сезон", folder:[{title:"1 серия", id:"s1v1", file:"..."}]}]
       for (const s of fileNode as Array<{ title?: string; folder?: Array<{ id?: string; title?: string; file?: string }> }>) {
         const sNumMatch = String(s.title ?? '').match(/(\d+)/);
         const sId = sNumMatch && sNumMatch[1] ? sNumMatch[1] : String(seasons.length + 1);
@@ -836,14 +946,19 @@ async function captureFromVideoseed(iframeUrl: string): Promise<PlayerStructure>
         for (const e of s.folder ?? []) {
           const eNumMatch = String(e.title ?? e.id ?? '').match(/(\d+)/);
           const eId = eNumMatch && eNumMatch[1] ? eNumMatch[1] : String(episodes.length + 1);
-          const voices = parseVoices(e.file ?? '');
+          const voices: VoiceInfo[] = parseVoiceTitles(e.file ?? '').map((title) => ({
+            title,
+            file: buildVideoseedMarker(iframeUrl, sId, eId, title),
+          }));
           if (voices.length) episodes.push({ id: eId, title: `Серия ${eId}`, voices });
         }
         if (episodes.length) seasons.push({ id: sId, title: `Сезон ${sId}`, episodes });
       }
     } else if (typeof fileNode === 'string') {
-      // Фильм: один эпизод со списком голосов.
-      const voices = parseVoices(fileNode);
+      const voices: VoiceInfo[] = parseVoiceTitles(fileNode).map((title) => ({
+        title,
+        file: buildVideoseedMarker(iframeUrl, 'film', 'film', title),
+      }));
       if (voices.length) {
         seasons.push({ id: 'film', title: 'Фильм', episodes: [{ id: 'film', title: '1', voices }] });
       }
