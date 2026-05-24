@@ -121,6 +121,53 @@
       "videoseed_iframe": "https://tv-1-kinoserial.net/embed_serial/913/?token=a82f44b1b020395e7677d9c9132116d6",
       "vibix_available": true
     },
+    "1382256": {
+      "kinopoisk_id": 1382256,
+      "title": null,
+      "updated_at": "2026-05-24T19:54:12.262Z",
+      "ortified_id": 87181,
+      "flixcdn": {
+        "show_id": 299,
+        "is_serial": false,
+        "seasons_episodes": {},
+        "translations": [
+          {
+            "id": 48,
+            "title": "Профессиональный (многоголосый закадровый) (Jaskier)"
+          },
+          {
+            "id": 47,
+            "title": "Любительский (многоголосый закадровый) (Озвучим)"
+          },
+          {
+            "id": 25,
+            "title": "Полное дублирование (MovieDalen)"
+          },
+          {
+            "id": 10,
+            "title": "Любительский (многоголосый закадровый) (заКАДРЫ)"
+          },
+          {
+            "id": 1937,
+            "title": "Любительский (многоголосый закадровый) (GoShows)"
+          },
+          {
+            "id": 28,
+            "title": "Любительский (многоголосый закадровый) (LE-Production)"
+          },
+          {
+            "id": 51,
+            "title": "Профессиональный (многоголосый закадровый) (LostFilm)"
+          },
+          {
+            "id": 85,
+            "title": "Авторский (одноголосый закадровый) (Яроцкий Михаил | Kyberpunk)"
+          }
+        ]
+      },
+      "videoseed_iframe": "https://tv-1-kinoserial.net/embed/1056241/?token=a82f44b1b020395e7677d9c9132116d6",
+      "vibix_available": true
+    },
     "5330764": {
       "kinopoisk_id": 5330764,
       "title": null,
@@ -166,6 +213,5 @@
         ]
       }
     }
-  },
-  "updated_at": "2026-05-23T22:47:19.999Z"
+  }
 }
