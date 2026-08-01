@@ -214,8 +214,12 @@ function handleMessage(room: Room, fromId: string, msg: unknown): void {
       return;
     }
     case 'ping': {
+      // serverTime нужен клиенту, чтобы вычислить смещение своих часов от наших:
+      // все playback/seek/heartbeat несут серверное время в fromTime, и без
+      // поправки зритель с уехавшими на пару секунд часами считал бы, что вечно
+      // отстаёт, и дёргался в ресинк каждые десять секунд.
       const member = room.members.get(fromId);
-      if (member) send(member.ws, { type: 'pong', t: m.t });
+      if (member) send(member.ws, { type: 'pong', t: m.t, serverTime: Date.now() });
       return;
     }
   }

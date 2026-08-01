@@ -30,7 +30,6 @@
   let selfId = null;
   let leaderId = null;
   let members = new Map();
-  let suppress = false;
   let ws = null;
   let lastHeartbeat = 0;
   let hls = null;
@@ -40,7 +39,38 @@
 
   // Sync tuning
   const HEARTBEAT_INTERVAL_MS = 10_000; // лидер шлёт snapshot времени раз в 10с
-  const DRIFT_RESYNC_THRESHOLD_S = 1.5; // зритель ресинкается если расхождение > 1.5с
+  const DRIFT_RESYNC_THRESHOLD_S = 1.5; // порог для playback-событий (play/pause/seek)
+  // Дрифт ниже DRIFT_DEADZONE_S не трогаем вообще, между ним и DRIFT_HARD_SEEK_S
+  // подгоняем скоростью, и только выше — прыгаем. Прыжок стоит перебуферизации:
+  // hls.js сбрасывает буфер и качает сегменты заново, поэтому на секунде
+  // расхождения он лечит меньше, чем ломает.
+  const DRIFT_DEADZONE_S = 0.3;
+  const DRIFT_HARD_SEEK_S = 4;
+  const PING_INTERVAL_MS = 15_000;
+
+  // Смещение наших часов относительно серверных, в миллисекундах.
+  let clockOffset = 0;
+  let clockSynced = false;
+  let bestRtt = Infinity;
+  let pingTimer = null;
+
+  /** Серверное «сейчас» по нашим часам. */
+  function serverNow() {
+    return Date.now() + clockOffset;
+  }
+
+  function handlePong(msg) {
+    const rtt = Date.now() - msg.t;
+    if (!(rtt >= 0) || typeof msg.serverTime !== 'number') return;
+    // Берём замер с наименьшим RTT: у него самая маленькая неопределённость по
+    // тому, в какой момент серверное время было снято. Пересчитываем и когда RTT
+    // явно улучшился, и в первый раз.
+    if (!clockSynced || rtt <= bestRtt) {
+      bestRtt = rtt;
+      clockOffset = msg.serverTime - (msg.t + rtt / 2);
+      clockSynced = true;
+    }
+  }
 
   function manifestUrl() {
     return `${BASE}/hls/${roomId}/index.m3u8?v=${sourceVersion}`;
@@ -88,13 +118,18 @@
     });
   }
 
-  function loadSource(url) {
+  function loadSource(url, startPosition) {
     if (hls) {
       try { hls.destroy(); } catch {}
       hls = null;
     }
+    // Позиция известна заранее (зритель заходит в середину фильма) — говорим её
+    // hls.js сразу. Без этого он начинает грузить нулевой фрагмент, и только
+    // потом мы прыгаем на нужное место, выбрасывая скачанное.
+    const startAt = typeof startPosition === 'number' && startPosition > 1 ? startPosition : -1;
     if (window.Hls && window.Hls.isSupported()) {
       hls = new window.Hls({
+        startPosition: startAt,
         enableWorker: true,
         lowLatencyMode: false,
         // Не тянуть 1080p в окно 800px — на узком канале это разница между
@@ -130,6 +165,12 @@
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
+      if (startAt > 0) {
+        video.addEventListener('loadedmetadata', function once() {
+          video.removeEventListener('loadedmetadata', once);
+          withExpectedSeek(startAt, () => { video.currentTime = startAt; });
+        });
+      }
     } else {
       toast('HLS не поддерживается этим браузером');
     }
@@ -288,6 +329,108 @@
     flushLogs(false);
   }, LOG_FLUSH_MS);
   window.addEventListener('pagehide', () => flushLogs(true));
+
+  // ===== Своё эхо =====
+  // Применяя состояние лидера, мы двигаем собственный плеер, и он честно
+  // отвечает событиями play/pause/seeked — а обработчики лидера рассылают их
+  // обратно в комнату. Флаг, снимаемый в микротаске, эту дыру не закрывал:
+  // video.play() асинхронен, и событие приходило уже после снятия флага. Поэтому
+  // запоминаем, что именно попросили, и на короткое время глотаем совпадающее.
+  const ECHO_WINDOW_MS = 800;
+  let expectedPaused = null;
+  let expectedSeek = null;
+
+  function expectPaused(value) {
+    expectedPaused = { value, until: Date.now() + ECHO_WINDOW_MS };
+  }
+
+  function expectSeek(time) {
+    expectedSeek = { time, until: Date.now() + ECHO_WINDOW_MS };
+  }
+
+  function withExpectedSeek(time, fn) {
+    expectSeek(time);
+    fn();
+  }
+
+  function consumeExpectedPaused(value) {
+    if (!expectedPaused) return false;
+    if (Date.now() > expectedPaused.until) { expectedPaused = null; return false; }
+    if (expectedPaused.value !== value) return false;
+    expectedPaused = null;
+    return true;
+  }
+
+  function consumeExpectedSeek() {
+    if (!expectedSeek) return false;
+    if (Date.now() > expectedSeek.until) { expectedSeek = null; return false; }
+    if (Math.abs(expectedSeek.time - video.currentTime) > 0.5) return false;
+    expectedSeek = null;
+    return true;
+  }
+
+  // ===== Подстройка под лидера =====
+  // Зритель, отставший на секунду, раньше получал прыжок currentTime: hls.js на
+  // этом сбрасывает буфер и качает сегменты заново, то есть лечение выглядело как
+  // та же остановка картинки, от которой лечим. Вместо прыжка тихо меняем
+  // скорость — при 1.03 секунда догоняется за полминуты и на слух это незаметно
+  // (браузер сам сохраняет высоту голоса). Прыжок остаётся только для большого
+  // расхождения, где скоростью догонять слишком долго.
+  let isStalled = false;
+
+  function setRate(rate) {
+    if (Math.abs(video.playbackRate - rate) < 0.001) return;
+    try { video.playbackRate = rate; } catch {}
+  }
+
+  function resetRate() {
+    setRate(1);
+  }
+
+  video.addEventListener('waiting', () => { isStalled = true; });
+  video.addEventListener('stalled', () => { isStalled = true; });
+  video.addEventListener('canplay', () => { isStalled = false; });
+  video.addEventListener('playing', () => { isStalled = false; });
+
+  /**
+   * Подтянуть зрителя к target. drift > 0 — мы впереди, < 0 — отстали.
+   * Возвращает true, если пришлось прыгнуть.
+   */
+  function correctDrift(target) {
+    const drift = video.currentTime - target;
+    const mag = Math.abs(drift);
+
+    if (mag >= DRIFT_HARD_SEEK_S) {
+      // Застрявшего зрителя прыжок вперёд только добивает: он отстал потому, что
+      // ему не хватает данных, а прыжок отменяет всё уже скачанное. Пока он
+      // буферизуется, ждём — вернётся сам, а если отстанет совсем далеко, прыжок
+      // всё равно случится по нижней ветке.
+      if (isStalled && mag < DRIFT_HARD_SEEK_S * 2.5) return false;
+      resetRate();
+      clog('resync', { drift: +drift.toFixed(2), ct: +video.currentTime.toFixed(1), buf: bufferAheadS() });
+      withExpectedSeek(target, () => { video.currentTime = target; });
+      return true;
+    }
+
+    if (mag < DRIFT_DEADZONE_S || video.paused) {
+      resetRate();
+      return false;
+    }
+
+    if (drift < 0) {
+      // Отстали — ускоряемся, но только если есть что играть впереди. Иначе
+      // ускорение просто быстрее опустошит буфер.
+      if (isStalled || bufferAheadS() < 3 || video.readyState < 3) {
+        resetRate();
+        return false;
+      }
+      setRate(mag >= 1 ? 1.08 : 1.03);
+    } else {
+      // Убежали вперёд — притормаживаем; буфер при этом только растёт.
+      setRate(mag >= 1 ? 0.92 : 0.97);
+    }
+    return false;
+  }
 
   function isMovie() {
     return playlist && playlist.seasons.length === 1 && playlist.seasons[0].id === 'film';
@@ -552,42 +695,68 @@
     }
   });
 
-  function applySnapshot(snap) {
-    if (!snap) return;
-    suppress = true;
-    if (Math.abs(video.currentTime - snap.currentTime) > 0.5) {
-      video.currentTime = snap.currentTime;
-    }
-    if (snap.paused && !video.paused) video.pause();
-    if (!snap.paused && video.paused) video.play().catch(() => {});
-    queueMicrotask(() => (suppress = false));
+  /**
+   * Где комната находится сейчас по данным snapshot'а. Snapshot обновляется
+   * только heartbeat'ами лидера, то есть раз в десять секунд, поэтому без
+   * поправки на его возраст новый зритель встаёт до десяти секунд позади — и
+   * первый же heartbeat вырывал его вперёд прыжком.
+   */
+  function snapshotTarget(snap) {
+    if (snap.paused) return snap.currentTime;
+    return snap.currentTime + Math.max(0, (serverNow() - snap.updatedAt) / 1000);
   }
 
-  function applyPlayback(msg) {
-    suppress = true;
-    const lag = (Date.now() - msg.fromTime) / 1000;
-    const target = msg.paused ? msg.currentTime : msg.currentTime + lag;
-    if (Math.abs(video.currentTime - target) > 1.5) {
-      video.currentTime = target;
+  function applySnapshot(snap) {
+    if (!snap) return;
+    const target = snapshotTarget(snap);
+    if (Math.abs(video.currentTime - target) > 0.5) {
+      withExpectedSeek(target, () => { video.currentTime = target; });
     }
-    if (msg.paused && !video.paused) video.pause();
-    if (!msg.paused && video.paused) video.play().catch(() => {});
-    queueMicrotask(() => (suppress = false));
+    if (snap.paused && !video.paused) {
+      expectPaused(true);
+      video.pause();
+    }
+    if (!snap.paused && video.paused) {
+      expectPaused(false);
+      video.play().catch(() => {});
+    }
+  }
+
+  /** Лидер нажал play/pause. */
+  function applyPlayback(msg) {
+    const lag = msg.paused ? 0 : Math.max(0, (serverNow() - msg.fromTime) / 1000);
+    const target = msg.currentTime + lag;
+    if (Math.abs(video.currentTime - target) > DRIFT_RESYNC_THRESHOLD_S) {
+      resetRate();
+      withExpectedSeek(target, () => { video.currentTime = target; });
+    }
+    if (msg.paused && !video.paused) {
+      resetRate();
+      expectPaused(true);
+      video.pause();
+    }
+    if (!msg.paused && video.paused) {
+      expectPaused(false);
+      video.play().catch(() => {});
+    }
+  }
+
+  /**
+   * Лидер сам прыгнул по таймлайну. Это осознанный разрыв, поэтому повторяем его
+   * прыжком, а не подгонкой скорости. Состояние play/pause не трогаем: его нет в
+   * сообщении, а раньше сюда подставлялось состояние самого зрителя.
+   */
+  function applySeek(msg) {
+    const lag = video.paused ? 0 : Math.max(0, (serverNow() - msg.fromTime) / 1000);
+    const target = msg.currentTime + lag;
+    resetRate();
+    withExpectedSeek(target, () => { video.currentTime = target; });
   }
 
   function applyHeartbeat(msg) {
     if (isLeader()) return;
-    const lag = (Date.now() - msg.fromTime) / 1000;
-    const target = msg.currentTime + (video.paused ? 0 : lag);
-    const drift = video.currentTime - target;
-    if (Math.abs(drift) > DRIFT_RESYNC_THRESHOLD_S) {
-      // Постоянные ресинки (6/мин) = видео у зрителя само не идёт, его тащит
-      // heartbeat — так выглядел зависший декодер в кейсе Elkjul.
-      clog('resync', { drift: +drift.toFixed(2), ct: +video.currentTime.toFixed(1), buf: bufferAheadS() });
-      suppress = true;
-      video.currentTime = target;
-      queueMicrotask(() => (suppress = false));
-    }
+    const lag = video.paused ? 0 : Math.max(0, (serverNow() - msg.fromTime) / 1000);
+    correctDrift(msg.currentTime + lag);
   }
 
   function applySourceChange(msg) {
@@ -610,12 +779,12 @@
     if (sameEpisode && hls) {
       applyAudioTrack();
     } else {
-      suppress = true;
+      resetRate();
+      expectPaused(true);
       video.pause();
-      video.currentTime = 0;
+      withExpectedSeek(0, () => { video.currentTime = 0; });
       loadSource(manifestUrl());
       applySubtitleTracks();
-      queueMicrotask(() => (suppress = false));
     }
     toast(
       isMovie()
@@ -625,10 +794,20 @@
     );
   }
 
+  function startPinging() {
+    clearInterval(pingTimer);
+    // Первый обмен сразу: до него поправка часов равна нулю, то есть работает
+    // прежняя арифметика по «сырым» Date.now().
+    send({ type: 'ping', t: Date.now() });
+    pingTimer = setInterval(() => send({ type: 'ping', t: Date.now() }), PING_INTERVAL_MS);
+  }
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}${BASE}/ws/${roomId}`);
+    ws.addEventListener('open', startPinging);
     ws.addEventListener('close', () => {
+      clearInterval(pingTimer);
       clog('wsClose', {});
       toast('Связь потеряна, переподключаюсь…', 1500);
       setTimeout(connect, 1500);
@@ -637,7 +816,12 @@
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
       switch (msg.type) {
-        case 'welcome':
+        case 'welcome': {
+          // Обрыв WebSocket'а — это ещё не смена источника. Раньше любой разрыв
+          // (а переподключение идёт каждые 1.5с) пересоздавал плеер: буфер
+          // выбрасывался, манифест запрашивался заново, картинка вставала. Если
+          // источник тот же и плеер жив — оставляем его в покое.
+          const sameSource = hls !== null && sourceVersion === (msg.sourceVersion || 1);
           selfId = msg.selfId;
           leaderId = msg.leaderId;
           members = new Map(msg.members.map((m) => [m.id, m]));
@@ -646,12 +830,20 @@
           sourceVersion = msg.sourceVersion || 1;
           updateRoleBadge();
           updateCurrentBadge();
-          loadSource(manifestUrl());
-          applySubtitleTracks();
+          if (!sameSource) {
+            loadSource(manifestUrl(), msg.snapshot ? snapshotTarget(msg.snapshot) : undefined);
+            applySubtitleTracks();
+          }
           applySnapshot(msg.snapshot);
-          clog('welcome', { leader: isLeader() ? 1 : 0, members: members.size, v: sourceVersion });
+          clog('welcome', {
+            leader: isLeader() ? 1 : 0,
+            members: members.size,
+            v: sourceVersion,
+            kept: sameSource ? 1 : 0,
+          });
           flushLogs(false); // hello + welcome уходят сразу, не ждём 20с тика
           break;
+        }
         case 'member-join':
           members.set(msg.id, { id: msg.id, name: msg.name });
           updateRoleBadge();
@@ -664,16 +856,24 @@
         case 'leader-change':
           leaderId = msg.leaderId;
           updateRoleBadge();
-          if (isLeader()) toast('Ты теперь лидер');
+          // Лидер ни к кому не подстраивается: если он унаследовал подкрученную
+          // скорость от роли зрителя, комната поедет за ним быстрее нормы.
+          if (isLeader()) {
+            resetRate();
+            toast('Ты теперь лидер');
+          }
           break;
         case 'playback':
           applyPlayback(msg);
           break;
         case 'seek':
-          applyPlayback({ ...msg, paused: video.paused });
+          applySeek(msg);
           break;
         case 'heartbeat':
           applyHeartbeat(msg);
+          break;
+        case 'pong':
+          handlePong(msg);
           break;
         case 'source-change':
           applySourceChange(msg);
@@ -690,15 +890,17 @@
   }
 
   video.addEventListener('play', () => {
-    if (suppress || !isLeader()) return;
+    if (consumeExpectedPaused(false) || !isLeader()) return;
     send({ type: 'playback', paused: false, currentTime: video.currentTime });
   });
   video.addEventListener('pause', () => {
-    if (suppress || !isLeader()) return;
+    if (consumeExpectedPaused(true) || !isLeader()) return;
     send({ type: 'playback', paused: true, currentTime: video.currentTime });
   });
   video.addEventListener('seeked', () => {
-    if (suppress || !isLeader()) return;
+    if (consumeExpectedSeek() || !isLeader()) return;
+    // Лидер прыгнул руками — скорость больше подгонять не нужно.
+    resetRate();
     send({ type: 'seek', currentTime: video.currentTime });
   });
   video.addEventListener('timeupdate', () => {
