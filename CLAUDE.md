@@ -74,9 +74,13 @@ src/
 
 deploy/
 ├── watch.service         — systemd. ExecStart через xvfb-run + /opt/node22/bin/node.
-├── nginx-watch.conf      — location-блоки для subpath-деплоя (/watch/ + /watch/ws/).
+├── nginx-watch.conf      — location-блоки для subpath-деплоя (/watch/ + /watch/ws/
+│                            + кеширующая regex-локация для сегментов).
 │                            Вставляются в существующий server{} :443. Это то, что
 │                            реально стоит на frogsrop.dev.
+├── nginx-watch-cache.conf — proxy_cache_path для сегментов, идёт в http{}
+│                            (/etc/nginx/conf.d/). Без него nginx не стартует:
+│                            зона watch_segments не найдена.
 └── Caddyfile             — legacy-заготовка под отдельный домен, в проде не используется.
 
 scripts/

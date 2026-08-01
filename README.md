@@ -76,9 +76,23 @@ systemd + nginx:
 sudo cp deploy/watch.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now watch
 
+# кеш сегментов — ДО location-блоков, иначе nginx не найдёт зону watch_segments
+sudo cp deploy/nginx-watch-cache.conf /etc/nginx/conf.d/watch-cache.conf
+sudo mkdir -p /var/cache/nginx/watch && sudo chown www-data:www-data /var/cache/nginx/watch
+
 # содержимое deploy/nginx-watch.conf вставить в server{} блок :443 нужного домена
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+**Зачем кеш.** Прокси не мультиплексирует: без кеша каждый зритель тянет свою
+копию каждого сегмента, поэтому комната из N человек даёт N-кратную нагрузку на
+CDN и на канал — при том что все смотрят ровно одни и те же байты. Внутри
+комнаты подписанный URL у всех одинаковый, так что сегмент забирается с CDN один
+раз. `proxy_cache_lock` обязателен: зрители синхронны и запрашивают сегмент
+одновременно, без него все они промахиваются мимо кеша и идут к CDN разом.
+
+Проверить попадания: `curl -sI https://<host>/watch/hls/<room>/p/<...> | grep -i x-cache-status`
+→ `MISS` у первого зрителя, `HIT` у остальных.
 
 ### Обновление
 
