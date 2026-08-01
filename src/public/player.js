@@ -94,7 +94,16 @@
       hls = null;
     }
     if (window.Hls && window.Hls.isSupported()) {
-      hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+      hls = new window.Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        // Не тянуть 1080p в окно 800px — на узком канале это разница между
+        // просмотром и слайдшоу. В fullscreen кап поднимается сам.
+        capLevelToPlayerSize: true,
+        // Больше запаса на дрожащем канале: зритель переживёт провал скорости,
+        // не опустошив буфер и не словив ресинк-рывок от лидера.
+        maxBufferLength: 60,
+      });
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(window.Hls.Events.MANIFEST_PARSED, applyAudioTrack);

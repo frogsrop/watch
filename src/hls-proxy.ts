@@ -97,6 +97,7 @@ function cookieHeaderFor(targetUrl: string, session: SessionHeaders): string {
 export async function fetchUpstream(
   targetUrl: string,
   session: SessionHeaders,
+  range?: string,
 ): Promise<Dispatcher.ResponseData> {
   const headers: Record<string, string> = {
     'user-agent': session.userAgent,
@@ -106,5 +107,6 @@ export async function fetchUpstream(
   };
   const cookie = cookieHeaderFor(targetUrl, session);
   if (cookie) headers.cookie = cookie;
+  if (range) headers.range = range;
   return request(targetUrl, { method: 'GET', headers, maxRedirections: 3 });
 }

@@ -386,7 +386,7 @@ fastify.get<{ Params: { roomId: string; '*': string } }>(
     }
 
     try {
-      const upstream = await fetchUpstream(target, room.session);
+      const upstream = await fetchUpstream(target, room.session, req.headers.range);
       const ct = String(upstream.headers['content-type'] ?? '').toLowerCase();
       const isManifest = /mpegurl/.test(ct) || /\.m3u8(\?|$)/i.test(target);
 
@@ -399,6 +399,20 @@ fastify.get<{ Params: { roomId: string; '*': string } }>(
         const rewritten = rewriteManifest(body, target, room.id, PROXY_SECRET, PUBLIC_BASE_URL);
         return reply.type('application/vnd.apple.mpegurl').send(rewritten);
       }
+
+      // hls.js прерывает загрузку слишком медленного фрагмента и уходит на уровень
+      // ниже, только если знает его размер: прогноз строится на lengthComputable
+      // progress-событиях. Без content-length ответ уходит chunked, ABR слепнет —
+      // зритель на узком канале залипает на 1080p и получает по кадру раз в десятки
+      // секунд, вместо того чтобы съехать на 480p.
+      if (!upstream.headers['content-encoding']) {
+        for (const h of ['content-length', 'content-range'] as const) {
+          const v = upstream.headers[h];
+          if (v !== undefined) reply.header(h, String(v));
+        }
+      }
+      const acceptRanges = upstream.headers['accept-ranges'];
+      if (acceptRanges !== undefined) reply.header('accept-ranges', String(acceptRanges));
 
       const ctOut = ct || (target.endsWith('.ts') ? 'video/mp2t' : 'application/octet-stream');
       return reply.type(ctOut).send(upstream.body);
