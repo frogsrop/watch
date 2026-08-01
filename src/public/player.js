@@ -100,6 +100,11 @@
         // Не тянуть 1080p в окно 800px — на узком канале это разница между
         // просмотром и слайдшоу. В fullscreen кап поднимается сам.
         capLevelToPlayerSize: true,
+        // ABR смотрит только на скорость канала. Если канала хватает, а машина не
+        // успевает декодировать 1080p (софтверный декод), картинка идёт рывками при
+        // полном буфере — и сам ABR это не лечит. Это роняет уровень по доле
+        // выпавших кадров.
+        capLevelOnFPSDrop: true,
         // Больше запаса на дрожащем канале: зритель переживёт провал скорости,
         // не опустошив буфер и не словив ресинк-рывок от лидера.
         maxBufferLength: 60,
@@ -117,6 +122,26 @@
       toast('HLS не поддерживается этим браузером');
     }
   }
+
+  // Когда у зрителя «идёт по кадру», по логам сервера не видно, сеть это или
+  // декодер: серверу оба случая выглядят одинаково. Просим открыть консоль
+  // (F12) и выполнить watchStats() — большой dropped при полном буфере значит,
+  // что машина не тянет уровень, а не что канал узкий.
+  window.watchStats = function () {
+    const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+    const level = hls && hls.levels ? hls.levels[hls.currentLevel] : null;
+    return {
+      роль: isLeader() ? 'лидер' : 'зритель',
+      качество: level ? level.height + 'p @ ' + Math.round(level.bitrate / 1000) + ' kbps' : 'н/д',
+      уровнейВсего: hls && hls.levels ? hls.levels.length : 0,
+      выпалоКадров: q ? q.droppedVideoFrames + ' из ' + q.totalVideoFrames : 'н/д',
+      буферВперёд:
+        video.buffered.length
+          ? +(video.buffered.end(video.buffered.length - 1) - video.currentTime).toFixed(1) + 'с'
+          : '0с',
+      времяВидео: +video.currentTime.toFixed(1),
+    };
+  };
 
   function isMovie() {
     return playlist && playlist.seasons.length === 1 && playlist.seasons[0].id === 'film';
