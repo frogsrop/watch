@@ -5,9 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>watch — комната</title>
   <link rel="icon" href="{{BASE_PATH}}/static/favicon.svg" type="image/svg+xml" />
+  <link rel="preload" href="{{BASE_PATH}}/static/fonts/inter-variable.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="{{BASE_PATH}}/static/styles.css" />
   <script>window.__WATCH_BASE_PATH = '{{BASE_PATH}}';</script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+  <!-- hls.js лежит у нас, а не на jsdelivr: из России до него не всегда доезжают,
+       а блокирующий тег в head means зритель ждёт чужой CDN прежде чем увидит
+       страницу. defer на обоих скриптах сохраняет порядок и не тормозит парсинг —
+       window.Hls нужен только после welcome по WebSocket. -->
+  <script defer src="{{BASE_PATH}}/static/vendor/hls.min.js"></script>
+  <script defer src="{{BASE_PATH}}/static/player.js"></script>
 </head>
 <body class="page-room">
   <div class="stage">
@@ -78,6 +84,5 @@
     </div>
     <div id="toast" class="toast" hidden></div>
   </div>
-  <script src="{{BASE_PATH}}/static/player.js"></script>
 </body>
 </html>
