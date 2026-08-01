@@ -33,6 +33,8 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const BASE_PATH = (process.env.PUBLIC_BASE_PATH ?? '').replace(/\/$/, '');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT}${BASE_PATH}`).replace(/\/$/, '');
 const PROXY_SECRET = process.env.PROXY_SECRET ?? randomBytes(32).toString('hex');
+// Сколько раз перезапросить сегмент у CDN, если тот ответил 5xx.
+const UPSTREAM_RETRIES = Number(process.env.WATCH_UPSTREAM_RETRIES ?? 2);
 
 const distPublic = join(__dirname, 'public');
 const srcPublic = join(__dirname, '..', 'src', 'public');
@@ -386,7 +388,24 @@ fastify.get<{ Params: { roomId: string; '*': string } }>(
     }
 
     try {
-      const upstream = await fetchUpstream(target, room.session, req.headers.range);
+      // CDN изредка отдаёт 504 на отдельный сегмент — видели, как два зрителя
+      // получили его на одном и том же seg-149 в одну секунду. Пробросить это
+      // клиенту значит оставить дыру в буфере: hls.js упрётся в неё и картинка
+      // встанет, хотя сегмент отдаётся со второй попытки. Тело неудачного ответа
+      // обязательно сливаем — иначе соединение undici не вернётся в пул.
+      let upstream = await fetchUpstream(target, room.session, req.headers.range);
+      for (let attempt = 1; attempt <= UPSTREAM_RETRIES && upstream.statusCode >= 500; attempt++) {
+        await upstream.body.dump().catch(() => {});
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+        upstream = await fetchUpstream(target, room.session, req.headers.range);
+        if (upstream.statusCode < 500) {
+          req.log.info({ target, attempt }, 'upstream recovered after retry');
+        }
+      }
+      if (upstream.statusCode >= 500) {
+        req.log.warn({ target, status: upstream.statusCode }, 'upstream 5xx after retries');
+      }
+
       const ct = String(upstream.headers['content-type'] ?? '').toLowerCase();
       const isManifest = /mpegurl/.test(ct) || /\.m3u8(\?|$)/i.test(target);
 
