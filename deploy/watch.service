@@ -1,22 +1,31 @@
 [Unit]
-Description=watch — synchronized kinogo viewer
+Description=watch — synchronized watch-party
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=watch
+Group=watch
 WorkingDirectory=/opt/watch
 Environment=NODE_ENV=production
+# Chrome writes its profile/crash dirs under $HOME; PrivateTmp keeps that private
+Environment=HOME=/tmp
 EnvironmentFile=/etc/watch.env
-ExecStart=/usr/bin/node dist/server.js
+# xvfb-run is required: WATCH_HEADLESS=0 + system Chrome, otherwise Playwright finds no display.
+# /opt/node22 is a standalone Node 22 install — the system node may be older and shared
+# with other services on the same box.
+ExecStart=/usr/bin/xvfb-run -a /opt/node22/bin/node dist/server.js
 Restart=on-failure
 RestartSec=3
+# xvfb-run wraps node in a shell — mixed lets systemd reap the whole tree on stop
+KillMode=mixed
+TimeoutStopSec=15
 LimitNOFILE=65535
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/watch/data /tmp
+ReadWritePaths=/opt/watch/data
 PrivateTmp=true
 
 [Install]

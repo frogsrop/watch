@@ -23,42 +23,80 @@ npm test
 
 ## Сборка и деплой на VPS
 
-Целевая платформа: Ubuntu 24.04 LTS, 2 vCPU / 4 GB RAM / ≥100 Мбит. Подходят TimeWeb, Selectel, Beget (рубли/СБП) или Hoster.kg (USD/крипта).
+Прод: **https://frogsrop.dev/watch/** (Debian 13, `/opt/watch`, юнит `watch.service`).
+
+Билд собирается локально и копируется на сервер — на VPS нет ни исходников, ни
+devDependencies, ни тулчейна TypeScript.
+
+### Первичная установка (один раз)
+
+Требования на сервере: Google Chrome stable (bundled Chromium не умеет H.264),
+`xvfb` и Node ≥22.
 
 ```bash
-# на VPS, один раз
-sudo apt update && sudo apt install -y nodejs npm caddy
-sudo useradd -r -m -d /opt/watch -s /bin/bash watch
-sudo -u watch git clone <твой-репо> /opt/watch
-cd /opt/watch
-sudo -u watch npm ci --omit=dev
-sudo -u watch npm run build
-sudo -u watch npx playwright install --with-deps chromium
+# Node 22 отдельной установкой — системный node может быть старее и
+# использоваться другими сервисами на этой же машине
+V=$(curl -s https://nodejs.org/dist/index.json | grep -o '"version":"v22\.[0-9.]*"' | head -1 | cut -d'"' -f4)
+curl -fsSLO "https://nodejs.org/dist/$V/node-$V-linux-x64.tar.xz"
+sudo mkdir -p /opt/node22 && sudo tar -xJf "node-$V-linux-x64.tar.xz" -C /opt/node22 --strip-components=1
 
-# конфиг
-sudo tee /etc/watch.env <<'EOF'
+# Google Chrome stable + xvfb
+sudo apt-get install -y gpg xvfb
+curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt-get update && sudo apt-get install -y google-chrome-stable
+
+# пользователь и каталоги
+sudo useradd --system --no-create-home --home-dir /opt/watch --shell /usr/sbin/nologin watch
+sudo mkdir -p /opt/watch/dist /opt/watch/data
+sudo chown -R $USER:$USER /opt/watch      # чтобы scp-деплой работал без sudo
+```
+
+Конфиг (`PROXY_SECRET` генерируется на сервере, не в git):
+
+```bash
+sudo tee /etc/watch.env >/dev/null <<EOF
 PORT=3000
 HOST=127.0.0.1
-PUBLIC_BASE_URL=https://watch.example.com
-PROXY_SECRET=<32+ случайных байт>
+PUBLIC_BASE_PATH=/watch
+PUBLIC_BASE_URL=https://frogsrop.dev/watch
+PROXY_SECRET=$(openssl rand -hex 32)
+WATCH_HEADLESS=0
+WATCH_CHROME_CHANNEL=chrome
+WATCH_DEBUG=0
 LOG_LEVEL=info
 EOF
-sudo chmod 600 /etc/watch.env
-
-# systemd + caddy
-sudo cp deploy/watch.service /etc/systemd/system/
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile  # отредактируй домен
-sudo systemctl daemon-reload
-sudo systemctl enable --now watch caddy
+sudo chown root:root /etc/watch.env && sudo chmod 640 /etc/watch.env
+sudo chown -R watch:watch /opt/watch/data   # сюда пишется auto-crawl кеш
 ```
 
-Обновление:
+systemd + nginx:
+
 ```bash
-sudo -u watch git -C /opt/watch pull
-sudo -u watch npm --prefix /opt/watch ci --omit=dev
-sudo -u watch npm --prefix /opt/watch run build
-sudo systemctl restart watch
+sudo cp deploy/watch.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now watch
+
+# содержимое deploy/nginx-watch.conf вставить в server{} блок :443 нужного домена
+sudo nginx -t && sudo systemctl reload nginx
 ```
+
+### Обновление
+
+```bash
+npm run typecheck && npm test && npm run build
+scp -r dist/* frogsrop@frogsrop.dev:/opt/watch/dist/
+scp data/*.json frogsrop@frogsrop.dev:/opt/watch/data/     # если менялись кеши
+ssh frogsrop@frogsrop.dev 'sudo systemctl restart watch'
+```
+
+Если менялся `package.json` — дополнительно:
+```bash
+scp package.json package-lock.json frogsrop@frogsrop.dev:/opt/watch/
+ssh frogsrop@frogsrop.dev 'cd /opt/watch && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 /opt/node22/bin/npm ci --omit=dev'
+```
+
+Проверка: `curl -s https://frogsrop.dev/watch/api/health` → `{"ok":true,...}`.
+Логи: `ssh frogsrop@frogsrop.dev 'sudo journalctl -u watch -f'`.
 
 ## Архитектура
 

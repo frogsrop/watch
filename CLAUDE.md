@@ -73,9 +73,11 @@ src/
         └── inter-variable.woff2  — Inter Variable (~350KB, woff2-variations).
 
 deploy/
-├── watch.service         — systemd, ExecStart через xvfb-run для Chrome.
-└── Caddyfile             — placeholder с watch.example.com. Альтернатива: nginx
-                            с location /watch/ { proxy_pass } — см. README.
+├── watch.service         — systemd. ExecStart через xvfb-run + /opt/node22/bin/node.
+├── nginx-watch.conf      — location-блоки для subpath-деплоя (/watch/ + /watch/ws/).
+│                            Вставляются в существующий server{} :443. Это то, что
+│                            реально стоит на frogsrop.dev.
+└── Caddyfile             — legacy-заготовка под отдельный домен, в проде не используется.
 
 scripts/
 ├── copy-public.mjs       — build step: cp -r src/public → dist/public.
@@ -182,20 +184,40 @@ LOG_LEVEL=info                         # Fastify log level
 
 ## Деплой
 
-VPS: Ubuntu 22.04+ (≥2 vCPU / 2 GB RAM рекомендовано). Setup описан в `README.md`.
+Прод: **https://frogsrop.dev/watch/**, хост `frogsrop@frogsrop.dev` (Debian 13,
+hostname машины — `mail.frogsrop.org`). Первичная установка описана в `README.md`.
+
+Раскладка на сервере:
+
+| Что | Где |
+|---|---|
+| Код (только билд, без исходников) | `/opt/watch/dist`, владелец `frogsrop` — чтобы scp работал без sudo |
+| Кеши (`kinomix-cache.json` и пр.) | `/opt/watch/data`, владелец `watch` — сюда пишет auto-crawl |
+| Конфиг | `/etc/watch.env` (root:root 0640, `PROXY_SECRET` сгенерирован на сервере) |
+| Юнит | `/etc/systemd/system/watch.service` (шаблон — `deploy/watch.service`) |
+| Reverse proxy | блок в `/etc/nginx/sites-available/frogsrop.dev` (шаблон — `deploy/nginx-watch.conf`) |
+| Node | `/opt/node22` — **отдельный** от системного |
+
+**Машина общая.** На ней же крутятся kotobilet (`:8787`), vkmusic (`:8770`) и
+tg-bot-test (`:3477`) на системном Node 20. Поэтому watch держит свой Node 22 в
+`/opt/node22` — апгрейд системного node сломал бы соседей. По той же причине nginx-конфиг
+редактируется точечной вставкой блока, а не перезаписью файла (там же `/`, `/api/`
+для kotobilet, `/music/`, `/tg-bot-test/`).
+
+`deploy/Caddyfile` — legacy-заготовка для отдельного домена, в проде не используется.
 
 ```bash
 # обновить код
-npm run build
-scp -r dist/* <user>@<host>:/opt/watch/dist/
-ssh <user>@<host> 'sudo systemctl restart watch'
+npm run typecheck && npm test && npm run build
+scp -r dist/* frogsrop@frogsrop.dev:/opt/watch/dist/
+ssh frogsrop@frogsrop.dev 'sudo systemctl restart watch'
 
-# конфиг (на сервере)
-sudo cat /etc/watch.env
-sudo cat /etc/systemd/system/watch.service
+# health + логи
+curl -s https://frogsrop.dev/watch/api/health
+ssh frogsrop@frogsrop.dev 'sudo journalctl -u watch -f'
 
-# логи
-sudo journalctl -u watch -f
+# debug на проде (не забыть выключить)
+ssh frogsrop@frogsrop.dev 'sudo sed -i "s/WATCH_DEBUG=.*/WATCH_DEBUG=1/" /etc/watch.env && sudo systemctl restart watch'
 ```
 
 ## Локальная разработка

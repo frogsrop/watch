@@ -1,0 +1,4 @@
+# Files copied to the Linux host must keep LF. CRLF in a systemd unit or an nginx
+# snippet fails in ways that are hard to spot — e.g. `Environment=HOME=/tmp\r`
+# silently points Chrome at a directory that doesn't exist.
+deploy/** text eol=lf
