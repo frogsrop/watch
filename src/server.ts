@@ -12,6 +12,7 @@ import {
   ExtractorError,
   resolveFlixcdnVoice,
   resolveVideoseedMarker,
+  warmupBrowser,
   type PlayerStructure,
   type ExtractResult,
 } from './extractor.js';
@@ -23,7 +24,8 @@ import {
   rewriteManifest,
   verifyUrl,
 } from './hls-proxy.js';
-import { RoomManager } from './room.js';
+import { RoomManager, type Room } from './room.js';
+import { createVersionedCache } from './versioned-cache.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,16 +42,54 @@ const distPublic = join(__dirname, 'public');
 const srcPublic = join(__dirname, '..', 'src', 'public');
 const PUBLIC_DIR = existsSync(distPublic) ? distPublic : srcPublic;
 
-const fastify = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+// disableRequestLogging: каждый сегмент, каждый файл статики и каждый манифест
+// давали по паре строк incoming/completed в journald — на комнату это тысячи
+// записей за фильм, в которых ничего не ищут. Явные req.log.* про отказы и
+// ретраи остаются, access-лог есть у nginx.
+const fastify = Fastify({
+  logger: { level: process.env.LOG_LEVEL ?? 'info' },
+  disableRequestLogging: true,
+});
 const rooms = new RoomManager();
 
 await fastify.register(fastifyWebsocket);
-await fastify.register(fastifyStatic, { root: PUBLIC_DIR, prefix: `${BASE_PATH}/static/` });
+await fastify.register(fastifyStatic, {
+  root: PUBLIC_DIR,
+  prefix: `${BASE_PATH}/static/`,
+  // Без maxAge @fastify/send отдаёт max-age=0, и браузер ревалидирует каждый
+  // файл на каждом заходе в комнату — включая 344 КБ шрифта. Имена файлов не
+  // хешируются, поэтому immutable не ставим: ETag остаётся, так что после
+  // истечения срока это дешёвый 304, а не повторная загрузка. Шрифт и иконку
+  // держим неделю (они не менялись с весны), скрипт и стили — час, чтобы
+  // деплой доезжал до зрителей в тот же вечер.
+  setHeaders(res, path) {
+    const long = /[\\/]fonts[\\/]|\.svg$/.test(path);
+    res.setHeader('cache-control', `public, max-age=${long ? 604800 : 3600}`);
+  },
+});
 
-async function serveHtml(reply: FastifyReply, filename: string) {
+// HTML читался с диска и прогонялся через regex на каждый запрос. Файлы
+// неизменны в пределах деплоя (деплой = scp + restart), поэтому подставляем
+// BASE_PATH один раз при старте. no-cache, а не max-age: /room/:id обязан
+// каждый раз проверять, что комната ещё жива, иначе зритель увидит плеер
+// вместо «room not found».
+const htmlCache = new Map<string, string>();
+
+async function renderHtml(filename: string): Promise<string> {
+  const cached = htmlCache.get(filename);
+  if (cached !== undefined) return cached;
   const raw = await readFile(join(PUBLIC_DIR, filename), 'utf-8');
   const html = raw.replace(/\{\{BASE_PATH\}\}/g, BASE_PATH);
-  return reply.type('text/html; charset=utf-8').send(html);
+  htmlCache.set(filename, html);
+  return html;
+}
+
+async function serveHtml(reply: FastifyReply, filename: string) {
+  const html = await renderHtml(filename);
+  return reply
+    .type('text/html; charset=utf-8')
+    .header('cache-control', 'no-cache')
+    .send(html);
 }
 
 fastify.get(`${BASE_PATH}/`, async (_req, reply) => serveHtml(reply, 'index.html'));
@@ -70,12 +110,46 @@ interface ProbeCacheEntry {
 }
 const probeCache = new Map<string, ProbeCacheEntry>();
 const PROBE_TTL_MS = 10 * 60 * 1000;
+// Два человека, вставивших один URL в одну секунду (или зритель, обновивший
+// лендинг), раньше запускали по своему Playwright-заходу — на 1 vCPU это две
+// параллельные Chrome-сессии на ту же работу. Держим промис в полёте и отдаём
+// его всем ожидающим.
+const probeInFlight = new Map<string, Promise<ProbeCacheEntry>>();
 
 function gcProbeCache() {
   const now = Date.now();
   for (const [k, v] of probeCache) {
     if (now - v.at > PROBE_TTL_MS) probeCache.delete(k);
   }
+}
+
+/** Свежая запись из кеша, либо один общий extract на всех ожидающих. */
+async function probeOrExtract(url: string): Promise<ProbeCacheEntry> {
+  gcProbeCache();
+  const cached = probeCache.get(url);
+  if (cached && Date.now() - cached.at < PROBE_TTL_MS) return cached;
+
+  const pending = probeInFlight.get(url);
+  if (pending) return pending;
+
+  const run = extractM3U8(url, { timeoutMs: 60_000 })
+    .then((result) => {
+      const entry: ProbeCacheEntry = {
+        url,
+        structure: result.structure,
+        cookies: result.cookies,
+        referer: result.referer,
+        userAgent: result.userAgent,
+        at: Date.now(),
+      };
+      probeCache.set(url, entry);
+      return entry;
+    })
+    .finally(() => {
+      probeInFlight.delete(url);
+    });
+  probeInFlight.set(url, run);
+  return run;
 }
 
 function validateSourceUrl(url: string): boolean {
@@ -86,23 +160,12 @@ fastify.post<{ Body: { url: string } }>(`${BASE_PATH}/api/probe`, async (req, re
   const url = String(req.body?.url ?? '').trim();
   if (!validateSourceUrl(url)) return reply.code(400).send({ error: 'invalid source url (kinogo|lordfilm|theboys.fun|kinomix.web.app)' });
 
-  gcProbeCache();
-  const cached = probeCache.get(url);
-  if (cached && Date.now() - cached.at < PROBE_TTL_MS) {
-    return reply.send({ structure: cached.structure, cached: true });
-  }
+  const hit = probeCache.get(url);
+  const fromCache = !!hit && Date.now() - hit.at < PROBE_TTL_MS;
 
   try {
-    const result = await extractM3U8(url, { timeoutMs: 60_000 });
-    probeCache.set(url, {
-      url,
-      structure: result.structure,
-      cookies: result.cookies,
-      referer: result.referer,
-      userAgent: result.userAgent,
-      at: Date.now(),
-    });
-    return reply.send({ structure: result.structure, cached: false });
+    const entry = await probeOrExtract(url);
+    return reply.send({ structure: entry.structure, cached: fromCache });
   } catch (e) {
     const msg = e instanceof ExtractorError ? `${e.stage}: ${e.message}` : (e as Error).message;
     req.log.error({ err: e }, 'probe failed');
@@ -188,20 +251,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
       episode = episode ?? tb[2];
     }
     try {
-      gcProbeCache();
-      let entry = probeCache.get(url);
-      if (!entry || Date.now() - entry.at > PROBE_TTL_MS) {
-        const result = await extractM3U8(url, { timeoutMs: 60_000 });
-        entry = {
-          url,
-          structure: result.structure,
-          cookies: result.cookies,
-          referer: result.referer,
-          userAgent: result.userAgent,
-          at: Date.now(),
-        };
-        probeCache.set(url, entry);
-      }
+      const entry = await probeOrExtract(url);
       const found = findInStructure(entry.structure, season, episode, voice, provider);
       if (!found) {
         return reply.code(400).send({ error: 'no matching combination' });
@@ -370,36 +420,64 @@ async function resolveKalaronaVoice(voiceFile: string, session: { userAgent: str
   }
 }
 
+/**
+ * Микрокеш корневого манифеста. Один запрос сюда — это резолв late-binding
+ * маркера (для videoseed это целый заход Playwright), загрузка плейлиста с CDN
+ * и HMAC-перепись каждой из нескольких тысяч строк. VOD-манифест hls.js берёт
+ * один раз на loadSource, так что запросы приходят не потоком, а всплесками:
+ * зрители заходят в комнату одновременно, обрыв WS у всех вызывал новый
+ * loadSource, лидер переключает серию. Всплеск в N зрителей давал N таких
+ * проходов — для videoseed это N параллельных Chrome-контекстов на 1 vCPU.
+ *
+ * Ключ — комната, версия проверяется явно: switch инкрементит sourceVersion,
+ * так что запись от прошлой серии не может быть отдана. Клиентский `?v=N` в URL
+ * при этом продолжает работать как и раньше.
+ */
+const manifestCache = createVersionedCache<string>({ ttlMs: 15_000 });
+
+/** Резолвит маркер, тянет плейлист и переписывает его. Без кеша. */
+async function buildManifest(room: Room): Promise<string> {
+  // Резолвим late-binding маркеры (kalarona/flixcdn/videoseed) в живой m3u8 URL
+  let voiceFile = room.current.voiceFile;
+  if (voiceFile.startsWith('kalarona-resolve:')) {
+    const resolved = await resolveKalaronaVoice(voiceFile, room.session);
+    if (!resolved) throw new ManifestError('kalarona resolve failed');
+    voiceFile = resolved;
+  } else if (voiceFile.startsWith('flixcdn-resolve:')) {
+    const resolved = await resolveFlixcdn(voiceFile);
+    if (!resolved) throw new ManifestError('flixcdn resolve failed');
+    voiceFile = resolved;
+  } else if (voiceFile.startsWith('videoseed-resolve:')) {
+    const resolved = await resolveVideoseedMarker(voiceFile);
+    if (!resolved) throw new ManifestError('videoseed resolve failed');
+    voiceFile = resolved;
+  }
+  const upstream = await fetchUpstream(voiceFile, room.session);
+  if (upstream.statusCode !== 200) {
+    await upstream.body.dump().catch(() => {});
+    throw new ManifestError(`upstream ${upstream.statusCode}`);
+  }
+  const body = await upstream.body.text();
+  return rewriteManifest(body, voiceFile, room.id, PROXY_SECRET, PUBLIC_BASE_URL);
+}
+
+/** Ожидаемый отказ (маркер не резолвится, CDN ответил не 200) — отдаём 502 без стектрейса. */
+class ManifestError extends Error {}
+
 fastify.get<{ Params: { roomId: string } }>(`${BASE_PATH}/hls/:roomId/index.m3u8`, async (req, reply) => {
   const room = rooms.get(req.params.roomId);
   if (!room) return reply.code(404).send('room not found');
   try {
-    // Резолвим late-binding маркеры (kalarona/flixcdn/videoseed) в живой m3u8 URL
-    let voiceFile = room.current.voiceFile;
-    if (voiceFile.startsWith('kalarona-resolve:')) {
-      const resolved = await resolveKalaronaVoice(voiceFile, room.session);
-      if (!resolved) return reply.code(502).send('kalarona resolve failed');
-      voiceFile = resolved;
-    } else if (voiceFile.startsWith('flixcdn-resolve:')) {
-      const resolved = await resolveFlixcdn(voiceFile);
-      if (!resolved) return reply.code(502).send('flixcdn resolve failed');
-      voiceFile = resolved;
-    } else if (voiceFile.startsWith('videoseed-resolve:')) {
-      const resolved = await resolveVideoseedMarker(voiceFile);
-      if (!resolved) return reply.code(502).send('videoseed resolve failed');
-      voiceFile = resolved;
-    }
-    const upstream = await fetchUpstream(voiceFile, room.session);
-    if (upstream.statusCode !== 200) {
-      return reply.code(502).send(`upstream ${upstream.statusCode}`);
-    }
-    const body = await upstream.body.text();
-    const rewritten = rewriteManifest(body, voiceFile, room.id, PROXY_SECRET, PUBLIC_BASE_URL);
+    const rewritten = await manifestCache.get(room.id, room.sourceVersion, () => buildManifest(room));
     return reply
       .type('application/vnd.apple.mpegurl')
       .header('cache-control', 'no-store')
       .send(rewritten);
   } catch (e) {
+    if (e instanceof ManifestError) {
+      req.log.warn({ room: room.id, reason: e.message }, 'index.m3u8 unavailable');
+      return reply.code(502).send(e.message);
+    }
     req.log.error({ err: e }, 'index.m3u8 fetch failed');
     return reply.code(502).send('upstream error');
   }
@@ -502,6 +580,13 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 try {
   await fastify.listen({ port: PORT, host: HOST });
   fastify.log.info(`watch-party listening on ${PUBLIC_BASE_URL}`);
+  // Chrome поднимается несколько секунд, и раньше их платил тот, кто первым
+  // вставил ссылку после рестарта. Греем в фоне: если запуск не удался, probe
+  // попробует сам — сервер из-за этого падать не должен.
+  void warmupBrowser().then(
+    () => fastify.log.info('browser warmed up'),
+    (e) => fastify.log.warn({ err: e }, 'browser warmup failed, will retry lazily'),
+  );
 } catch (e) {
   fastify.log.error(e);
   process.exit(1);

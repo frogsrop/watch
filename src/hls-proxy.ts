@@ -1,5 +1,26 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { request, Dispatcher } from 'undici';
+import { Agent, request, setGlobalDispatcher, Dispatcher } from 'undici';
+
+// hls.js держит впереди минуту видео, поэтому сегменты запрашиваются пачками с
+// долгими паузами между ними. С дефолтным keepAliveTimeout в 4 секунды сокет к
+// CDN умирает в каждой такой паузе, и следующая пачка начинается с TLS-хендшейка
+// — на RTT до российских CDN это лишние сотни миллисекунд перед каждым всплеском.
+// connections ограничивает сокеты на origin: на 1 vCPU лучше короткая очередь,
+// чем сотня параллельных загрузок, дерущихся за канал. Очередь per-origin, так
+// что медленный CDN одной комнаты не блокирует остальные.
+// Таймауты вместо дефолтных пяти минут: bodyTimeout у undici считается между
+// чанками, а не на весь ответ, так что медленный-но-живой сегмент он не рвёт.
+setGlobalDispatcher(
+  new Agent({
+    keepAliveTimeout: 60_000,
+    keepAliveMaxTimeout: 300_000,
+    connections: 16,
+    pipelining: 1,
+    connect: { timeout: 10_000 },
+    headersTimeout: 20_000,
+    bodyTimeout: 30_000,
+  }),
+);
 
 export interface SessionHeaders {
   referer: string;
@@ -104,6 +125,12 @@ export async function fetchUpstream(
     referer: session.referer,
     accept: '*/*',
     'accept-language': 'ru-RU,ru;q=0.9,en;q=0.8',
+    // Сегмент уходит клиенту стримом, поэтому его content-length мы просто
+    // пробрасываем — а значит тело должно быть тем же, что посчитал CDN. Сжатый
+    // ответ пришлось бы либо распаковывать, либо отдавать вместе с
+    // content-encoding, и любой промах здесь ломает ABR (см. hls.js и
+    // lengthComputable в server.ts). Просим identity и снимаем вопрос.
+    'accept-encoding': 'identity',
   };
   const cookie = cookieHeaderFor(targetUrl, session);
   if (cookie) headers.cookie = cookie;
