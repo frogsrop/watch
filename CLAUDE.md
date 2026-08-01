@@ -58,9 +58,13 @@ src/
 │                            segment URLs, allowed-hosts whitelist (cinemap.cc,
 │                            cinemar.cc, aniqit.com, kinogo.ec).
 ├── server.ts             — Fastify: routes под `${BASE_PATH}/` (поддержка subpath
-│                            deploy через PUBLIC_BASE_PATH). HTML serve-time templating
-│                            заменяет `{{BASE_PATH}}` placeholder. probeCache(10 мин)
-│                            шарит один Playwright-заход между несколькими комнатами.
+│                            deploy через PUBLIC_BASE_PATH). HTML темплейтится один раз
+│                            при старте (`{{BASE_PATH}}`) и отдаётся из памяти.
+│                            probeCache(10 мин) + single-flight шарит один
+│                            Playwright-заход между комнатами. manifestCache(15 сек)
+│                            гасит всплеск запросов index.m3u8.
+├── versioned-cache.ts    — кеш на короткий срок + single-flight. Версия сверяется при
+│                            чтении, поэтому запись от прошлой серии никому не достаётся.
 ├── cinemar-decode.ts     — legacy/research, regex-decoder для cinemar (не используется
 │                            в проде, JSON.parse-hook надёжнее).
 └── public/
@@ -69,18 +73,23 @@ src/
     ├── player.js         — hls.js client + WS protocol + picker handler + guest UI.
     ├── styles.css        — Vercel-monochrome design system (см. ниже).
     ├── favicon.svg       — amber dot SVG (matches pulse-dot в watch.).
+    ├── vendor/
+    │   └── hls.min.js    — hls.js 1.5.13, свой, а не с jsdelivr (см. ниже).
+    │                        Апгрейд руками: скачать dist/hls.min.js нужной версии,
+    │                        снять строку sourceMappingURL (карту мы не шипим).
     └── fonts/
         └── inter-variable.woff2  — Inter Variable (~350KB, woff2-variations).
 
 deploy/
 ├── watch.service         — systemd. ExecStart через xvfb-run + /opt/node22/bin/node.
 ├── nginx-watch.conf      — location-блоки для subpath-деплоя (/watch/ + /watch/ws/
-│                            + кеширующая regex-локация для сегментов).
-│                            Вставляются в существующий server{} :443. Это то, что
-│                            реально стоит на frogsrop.dev.
-├── nginx-watch-cache.conf — proxy_cache_path для сегментов, идёт в http{}
-│                            (/etc/nginx/conf.d/). Без него nginx не стартует:
-│                            зона watch_segments не найдена.
+│                            + кеширующая regex-локация для сегментов и субтитров,
+│                            gzip внутри наших локаций). Вставляются в существующий
+│                            server{} :443.
+├── nginx-watch-cache.conf — proxy_cache_path для сегментов + upstream watch_node с
+│                            keepalive, идут в http{} (/etc/nginx/conf.d/). Без них
+│                            nginx не стартует: не найдены ни зона watch_segments,
+│                            ни upstream.
 ├── nginx-watch-quic.conf — HTTP/3: listen 443 quic + Alt-Svc, в server{} :443.
 │                            Опционально, требует ufw allow 443/udp. TCP-listen
 │                            НЕ убирать — QUIC дополняет, а не заменяет.
@@ -178,16 +187,102 @@ ssh frogsrop@frogsrop.dev 'sudo journalctl -u watch --since "1h ago" | grep clie
 
 Кейс-эталон (комната Elkjul, 2026-08-01): у зрителя сегменты качались в темпе, буфер 110с, dropped=0 — но декодер выдал 264 кадра за десятки минут (зависший HW-декодер, слайдшоу на любом качестве). С сервера был неотличим от здорового; телеметрия ловит это как `fps≈0` при `paused=0, buf>10`.
 
+## Производительность — что и почему сделано
+
+Нагрузка тут всплесками, а не потоком: зрители заходят одновременно, обрыв WS
+поднимал всех сразу, лидер переключает серию. Поэтому почти всё ниже — про то,
+чтобы всплеск в N зрителей не превращался в N дорогих проходов.
+
+Замерено на проде 2026-08-02 после выката:
+
+| Что | Результат |
+|---|---|
+| Холодный extract kinogo (кеш пуст, сервис только поднят) | **1.7 сек** |
+| Вариантный плейлист (его тянет каждый зритель при входе) | 203 405 → **11 764 байта** |
+| Корневой манифест | сжимается, отдаётся из микрокеша |
+| 6 одновременных запросов `index.m3u8` | 190–228 мс при базовом RTT 180 мс |
+| Дрифт зрителя от лидера, два браузера | **59 мс**, `playbackRate` 1.0, ресинков 0 |
+| Строк в journald | 15 за 10 минут (было по паре на каждый сегмент) |
+
+**Горячий путь (Node)**
+- `manifestCache` (`versioned-cache.ts`, TTL 15 сек, ключ — комната, версия
+  сверяется при чтении) + single-flight. Один запрос `index.m3u8` = резолв
+  маркера (для videoseed это отдельный заход Playwright), загрузка плейлиста с
+  CDN и HMAC-перепись нескольких тысяч строк. hls.js берёт VOD-манифест один раз
+  на `loadSource`, так что кеш нужен не от потока, а от всплеска.
+- single-flight в `probeOrExtract` (server.ts) и в `fetchVideoseedRawMap`
+  (extractor.ts): два одновременных запроса одного URL больше не запускают два
+  Playwright'а.
+- undici `Agent` в `hls-proxy.ts`: `keepAliveTimeout` 60 сек вместо дефолтных 4 —
+  hls.js буферит минуту вперёд, поэтому сегменты качаются пачками с паузами, и на
+  дефолте сокет к CDN умирал в каждой паузе (TLS-хендшейк на каждый всплеск).
+  `connections: 16` на origin, таймауты вместо пятиминутных.
+- `accept-encoding: identity` наверх: content-length сегмента пробрасывается как
+  есть, а без него ABR слепнет (см. коммент про lengthComputable в server.ts).
+- HTML темплейтится один раз при старте; статика отдаётся с `max-age` (неделя для
+  шрифта и иконки, час для js/css — имена не хешируются, поэтому не `immutable`;
+  ETag остаётся, так что после истечения это дешёвый 304).
+- `disableRequestLogging` — раньше каждый сегмент давал пару строк в journald.
+- Chrome греется при старте (`warmupBrowser`), первый probe не платит за запуск.
+
+**nginx** (шаблоны в `deploy/`, на прод вставляются руками)
+- gzip объявлен **внутри наших локаций**, а не в http{}: vhost общий с тремя
+  сервисами. Главное — `gzip_proxied any`: его дефолт (`off`) и был причиной, по
+  которой http{}-левый `gzip on` не сжимал у нас ничего. Проверено на живом nginx:
+  манифест 3004 → 222 байта. `video/mp2t` намеренно не в списке.
+- Кеш-локация расширена с `/p/` до `/(p|sub)/` — субтитры теперь тоже тянутся с
+  CDN один раз на комнату, а не на зрителя.
+- `upstream watch_node` + `keepalive 8` + `Connection ""`: без этого nginx открывал
+  новое TCP-соединение к Node на каждый запрос.
+- `proxy_cache_valid 200 2h` (было 30m): досмотренный фильм не меняется, диск и так
+  ограничен `max_size` по LRU.
+
+**Синхронизация**
+- Дрифт до 4 сек подтягивается `playbackRate` (1.03 / 1.08 и обратные), а не
+  прыжком: прыжок заставляет hls.js сбросить буфер и качать заново, то есть лечение
+  выглядело как та же остановка картинки. Прыжок остался для расхождения ≥ 4 сек.
+  Ускоряем только при буфере > 3 сек и `readyState ≥ 3` — отставшего из-за
+  нехватки данных разгонять некуда.
+- Поправка часов через существовавший `ping`/`pong` (сервер теперь отдаёт в pong
+  `serverTime`). До неё зритель с часами, уехавшими на пару секунд, считал, что
+  вечно отстаёт, и получал ресинк каждые десять секунд.
+- Реконнект WS больше не пересоздаёт плеер, если версия источника та же (заодно
+  ушёл конфликтующий toast «Связь потеряна» при смене серии).
+- `snapshot` экстраполируется по `updatedAt`, позиция передаётся в hls.js как
+  `startPosition` — джойнер больше не грузит нулевой фрагмент, чтобы потом прыгнуть.
+- Флаг `suppress` заменён на модель ожидаемого эха (`expectPaused`/`expectSeek`):
+  `video.play()` асинхронен, и снятие флага в микротаске событие не покрывало —
+  из-за этого свежий лидер рассылал в комнату собственные pause и seek(0).
+
+**Extract** (замер на kinomix kp=277565: было 4.17–4.72 сек, стало 2.61–2.64)
+- Ожидания событийные вместо слепых опросов: `createSignal` будит ожидающего в
+  момент прихода нужного ответа (videoseed, vibix, lordfilm), Cloudflare ждётся
+  через `waitForFunction` вместо опроса `page.title()` раз в полсекунды.
+- В kinogo-цикле проверка идёт до сна, а не после: те 800 мс терялись всегда,
+  даже когда playerjs уже всё распарсил.
+- Провайдеры kinomix (Collaps, Videoseed, Vibix) опрашиваются разом через
+  `Promise.allSettled`, но **сливаются в фиксированном порядке** — от порядка
+  зависит, какая озвучка останется без суффикса провайдера.
+- `blockPageNoise` режет на странице картинки, шрифты, само видео и счётчики.
+  Список **запрещающий, а не разрешающий**: страница собирает плеер своим JS, и
+  любой не угаданный «разрешённый» хост означал бы сломанный extract — включая
+  Cloudflare, который обязан пройти. Выключается `WATCH_KINOGO_LEAN=0`.
+
 ## Известные хрупкости / TODO
 
 1. **m3u8 expiry**: URL подписан с `:YYYYMMDDHH` бакетом, ~1 час валидности. После 1 часа просмотра комната перестанет грузить сегменты. Решение (не реализовано): при 403 от cinemap.cc → re-probe и обновить current.voiceFile.
 2. **Смена источника через `hls.destroy() + new Hls()`** — клиенты теряют буфер. OK для смены серии (0:00), не подходит для смены качества (мы не делаем).
 3. **In-memory rooms** — при рестарте сервиса все активные комнаты пропадают, друзья видят «room not found» + WS reconnect loop. Не реализован persistence — оправдано: сессия 1-3 часа, рестарт нечастый.
-4. **First extract latency**: на 1 vCPU VPS первый заход ~10-20 сек (Cloudflare wait). Кеш `probeCache` (10 мин TTL) шарит между комнатами с тем же URL.
+4. **First extract latency**: было ~10-20 сек, после прогрева браузера при старте, резки рекламы и событийных ожиданий — 1.7 сек на kinogo (замер на проде 2026-08-02). Кеш `probeCache` (10 мин TTL) + single-flight шарят заход между комнатами с тем же URL. Заход всё ещё может быть долгим, если Cloudflare покажет челлендж или источник — kinomix с холодным кешем.
 5. **HTTP-only без домена**: `navigator.clipboard.writeText` не работает в insecure context — fallback через `document.execCommand('copy')`. С TLS-доменом — Caddy auto-LE.
 6. **Только kinogo**: extractor не работает для rezka/lordfilm/kodik. Cinemar — главный embed-provider в RuNet, многие сайты-обёртки используют его → расширяемо.
 7. **HUD не auto-hide**: всегда видим. YouTube/Netflix фейдят через 3 сек неактивности. Hover'ом мышью убирать оверлей не получится без JS-таймера.
-8. **Toast «Связь потеряна»** во время `source-change`: на стороне зрителя hls.destroy + new Hls() триггерит WS reconnect → видно конфликтующий toast. Нужно разделить ws-reconnect message от switch message.
+8. **Порядок сезонов от `api.ortified.ws` непредсказуем**: один и тот же kp отдаёт
+   сезоны в разном порядке от запроса к запросу (замерено: `1 3 2 4`, `4 1 3 2`,
+   `3 1 4 2`). `findInStructure` без явного сезона берёт первый в списке, поэтому
+   дефолтная серия при создании комнаты каждый раз из другого сезона. Не связано с
+   параллельным опросом провайдеров — проверено на коде до него. Лечится сортировкой
+   сезонов по номеру в `mergeStructures`/`structureFromVenom`.
 
 ## Env vars
 
@@ -200,6 +295,10 @@ PROXY_SECRET=<32+ random hex>          # HMAC ключ для signed m3u8 segmen
 WATCH_HEADLESS=0                       # 0 для xvfb (нужно для cinemar canPlayType)
 WATCH_CHROME_CHANNEL=chrome            # 'chrome' = system Google Chrome stable
 WATCH_DEBUG=0                          # 1 включает dbg() логи в extractor
+WATCH_KINOGO_LEAN=1                    # 0 отключает blockPageNoise (реклама/шрифты/
+                                       # картинки/счётчики грузятся как раньше)
+WATCH_UPSTREAM_RETRIES=2               # сколько раз перезапросить сегмент при 5xx
+WATCH_FLIXCDN=0                        # 1 включает Flixcdn-провайдера у kinomix
 LOG_LEVEL=info                         # Fastify log level
 ```
 
@@ -221,17 +320,28 @@ hostname машины — `mail.frogsrop.org`). Первичная устано�
 | Reverse proxy | блок в `/etc/nginx/sites-available/frogsrop.dev` (шаблон — `deploy/nginx-watch.conf`) |
 | Node | `/opt/node22` — **отдельный** от системного |
 
-**Что включено на проде** (состояние на 2026-08-01):
+**Что включено на проде** (состояние на 2026-08-02):
 
 | Что | Где настроено | Проверка |
 |---|---|---|
-| Кеш сегментов | `/etc/nginx/conf.d/watch-cache.conf` + regex-локация в vhost | `X-Cache-Status: HIT` на повторном запросе |
+| Кеш сегментов и субтитров | `/etc/nginx/conf.d/watch-cache.conf` + regex-локация `(p\|sub)` в vhost | `X-Cache-Status: HIT` на повторном запросе |
+| gzip | внутри наших локаций в vhost (не в http{} — vhost общий) | `curl -H 'Accept-Encoding: gzip' -sI .../index.m3u8` → `content-encoding: gzip` |
+| keepalive к Node | `upstream watch_node` в conf.d + `Connection ""` в локациях | `sudo grep -A3 "upstream watch_node" /etc/nginx/conf.d/watch-cache.conf` |
 | HTTP/3 (QUIC) | `listen 443 quic` в vhost, `ufw allow 443/udp` | `curl --http3-only -sI .../api/health` → `HTTP/3 200` |
 | BBR | `/etc/sysctl.d/99-bbr.conf` + `/etc/modules-load.d/bbr.conf` | `cat /proc/sys/net/ipv4/tcp_congestion_control` → `bbr` |
 
 BBR дал 3.4× на одиночном потоке (6.4 → 22.1 МБ/с на 25 МБ файле) и убрал
 разброс: было 4.7–8.5 МБ/с от прогона к прогону, стало 21.8–22.4. До него стоял
 `hybla` — loss-based, а значит режущий окно на каждой потере при RTT 56–133 мс.
+
+**Правка nginx на общем vhost.** Наш блок вставлен целиком из
+`deploy/nginx-watch.conf` и заменяется как диапазон строк: от комментария
+`# nginx location blocks for subpath deploy` до закрывающей скобки последней нашей
+локации, перед скобкой, закрывающей `server{}`. Порядок: сначала conf.d (там и зона
+кеша, и upstream — без него vhost не поднимется), потом локации, потом `nginx -t`.
+Перед вставкой конфиг стоит прогнать в контейнере `nginx:alpine` рядом с чужими
+локациями — ошибка в общем vhost роняет и соседей. Бэкапы деплоя 2026-08-02 лежат
+в `/root/watch-nginx-backup/` (`frogsrop.dev.*`, `watch-cache.conf.*`).
 
 **Машина общая.** На ней же крутятся kotobilet (`:8787`), vkmusic (`:8770`) и
 tg-bot-test (`:3477`) на системном Node 20. Поэтому watch держит свой Node 22 в

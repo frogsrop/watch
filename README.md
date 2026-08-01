@@ -76,13 +76,18 @@ systemd + nginx:
 sudo cp deploy/watch.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now watch
 
-# кеш сегментов — ДО location-блоков, иначе nginx не найдёт зону watch_segments
+# кеш сегментов + upstream watch_node — ДО location-блоков, иначе nginx не найдёт
+# ни зону watch_segments, ни upstream, и не стартует
 sudo cp deploy/nginx-watch-cache.conf /etc/nginx/conf.d/watch-cache.conf
 sudo mkdir -p /var/cache/nginx/watch && sudo chown www-data:www-data /var/cache/nginx/watch
 
 # содержимое deploy/nginx-watch.conf вставить в server{} блок :443 нужного домена
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Если домен общий с другими сервисами, конфиг стоит прогнать до вставки — поднять
+`nginx:alpine` в докере с нашими блоками рядом с чужими локациями и сделать
+`nginx -t` там. Ошибка в общем vhost роняет заодно и соседей.
 
 **Зачем кеш.** Прокси не мультиплексирует: без кеша каждый зритель тянет свою
 копию каждого сегмента, поэтому комната из N человек даёт N-кратную нагрузку на
@@ -146,7 +151,7 @@ ssh frogsrop@frogsrop.dev 'cd /opt/watch && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 /
 - `src/hls-proxy.ts` — переписывает HLS-манифесты (как master, так и media playlists, включая `URI="..."` в `#EXT-X-*` тегах). Все сегменты идут через `/hls/<roomId>/p/<base64url(url)>.<hmac-sha256-sig>` — подпись HMAC-SHA256, ограничение по домену (`*.cinemap.cc`, `*.cinemar.cc` и пр.) защищает от использования прокси как open relay.
 - `src/room.ts` — `RoomManager`: WebSocket-комнаты с моделью «follow the leader». Лидер = первый зашедший, перевыборы при disconnect. События `playback` / `seek` / `heartbeat` от лидера бродкастятся остальным с timestamp'ом, фронтенд догоняет.
 - `src/server.ts` — Fastify, связывает всё: `POST /api/extract`, `GET /hls/:roomId/...`, `WS /ws/:roomId`, статика.
-- `src/public/` — vanilla HTML/JS/CSS, hls.js с CDN.
+- `src/public/` — vanilla HTML/JS/CSS. hls.js лежит в `public/vendor/`, а не тянется с CDN: зрители в России, и чужой CDN в критическом пути загрузки страницы — лишняя точка отказа.
 
 ## Что вне скоупа
 
