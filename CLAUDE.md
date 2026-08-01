@@ -81,6 +81,9 @@ deploy/
 ├── nginx-watch-cache.conf — proxy_cache_path для сегментов, идёт в http{}
 │                            (/etc/nginx/conf.d/). Без него nginx не стартует:
 │                            зона watch_segments не найдена.
+├── nginx-watch-quic.conf — HTTP/3: listen 443 quic + Alt-Svc, в server{} :443.
+│                            Опционально, требует ufw allow 443/udp. TCP-listen
+│                            НЕ убирать — QUIC дополняет, а не заменяет.
 └── Caddyfile             — legacy-заготовка под отдельный домен, в проде не используется.
 
 scripts/
