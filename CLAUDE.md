@@ -205,6 +205,18 @@ hostname машины — `mail.frogsrop.org`). Первичная устано�
 | Reverse proxy | блок в `/etc/nginx/sites-available/frogsrop.dev` (шаблон — `deploy/nginx-watch.conf`) |
 | Node | `/opt/node22` — **отдельный** от системного |
 
+**Что включено на проде** (состояние на 2026-08-01):
+
+| Что | Где настроено | Проверка |
+|---|---|---|
+| Кеш сегментов | `/etc/nginx/conf.d/watch-cache.conf` + regex-локация в vhost | `X-Cache-Status: HIT` на повторном запросе |
+| HTTP/3 (QUIC) | `listen 443 quic` в vhost, `ufw allow 443/udp` | `curl --http3-only -sI .../api/health` → `HTTP/3 200` |
+| BBR | `/etc/sysctl.d/99-bbr.conf` + `/etc/modules-load.d/bbr.conf` | `cat /proc/sys/net/ipv4/tcp_congestion_control` → `bbr` |
+
+BBR дал 3.4× на одиночном потоке (6.4 → 22.1 МБ/с на 25 МБ файле) и убрал
+разброс: было 4.7–8.5 МБ/с от прогона к прогону, стало 21.8–22.4. До него стоял
+`hybla` — loss-based, а значит режущий окно на каждой потере при RTT 56–133 мс.
+
 **Машина общая.** На ней же крутятся kotobilet (`:8787`), vkmusic (`:8770`) и
 tg-bot-test (`:3477`) на системном Node 20. Поэтому watch держит свой Node 22 в
 `/opt/node22` — апгрейд системного node сломал бы соседей. По той же причине nginx-конфиг
