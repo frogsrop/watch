@@ -121,7 +121,12 @@
       hls.on(window.Hls.Events.MANIFEST_PARSED, applyAudioTrack);
       hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, applyAudioTrack);
       hls.on(window.Hls.Events.ERROR, (_e, data) => {
+        clogHlsError(data);
         if (data.fatal) toast('Ошибка воспроизведения: ' + data.type);
+      });
+      hls.on(window.Hls.Events.LEVEL_SWITCHED, (_e, d) => {
+        const l = hls && hls.levels ? hls.levels[d.level] : null;
+        clog('level', { h: l ? l.height : d.level });
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
@@ -149,6 +154,140 @@
       времяВидео: +video.currentTime.toFixed(1),
     };
   };
+
+  // ===== Телеметрия → сервер =====
+  // Кейс ElkjulQKv896AuLr8FzEH: у зрителя видеодекодер выдал 264 кадра за десятки
+  // минут при 110с буфера — с сервера клиент выглядел здоровым (сегменты качались
+  // в темпе). Шлём периодические stats + события плеера батчами на сервер, там
+  // они попадают в journalctl (grep clientlog).
+  const LOG_FLUSH_MS = 20_000;
+  const clientId = Math.random().toString(36).slice(2, 10);
+  let logQueue = [];
+  let logDead = 0; // 5 неудачных отправок подряд (рестарт сервера, комната умерла) — молчим
+  let lastHlsErr = '';
+  let lastHlsErrAt = 0;
+  let lastWaitAt = 0;
+  let statsPrev = null;
+
+  function clog(k, data) {
+    if (logQueue.length >= 80) return;
+    logQueue.push(Object.assign({ t: Date.now(), k }, data));
+  }
+
+  function flushLogs(useBeacon) {
+    if (!logQueue.length || logDead >= 5) return;
+    const body = JSON.stringify({ client: clientId, logs: logQueue.splice(0, 50) });
+    const url = `${BASE}/api/room/${roomId}/log`;
+    if (useBeacon && navigator.sendBeacon) {
+      try { navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })); } catch {}
+      return;
+    }
+    fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).then(
+      (r) => { logDead = r.ok ? 0 : logDead + 1; },
+      () => { logDead += 1; },
+    );
+  }
+
+  // Строка рендерера WebGL выдаёт состояние GPU: «SwiftShader» / «llvmpipe» =
+  // аппаратного ускорения нет, картинку рисует CPU — главный подозреваемый при
+  // «идёт по кадру» на любом качестве.
+  function gpuString() {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return 'no-webgl';
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      return String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)).slice(0, 120);
+    } catch {
+      return 'webgl-error';
+    }
+  }
+
+  // Буфер от ТЕКУЩЕЙ позиции, а не от конца последнего range (как в watchStats):
+  // buf=0 при ranges>0 значит, что currentTime сидит в дыре между range'ами.
+  function bufferAheadS() {
+    try {
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.currentTime >= video.buffered.start(i) - 0.5 && video.currentTime <= video.buffered.end(i)) {
+          return +(video.buffered.end(i) - video.currentTime).toFixed(1);
+        }
+      }
+    } catch {}
+    return 0;
+  }
+
+  function collectStats() {
+    const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+    const now = performance.now();
+    const snap = {
+      wall: now,
+      ct: video.currentTime,
+      frames: q ? q.totalVideoFrames : -1,
+      dropped: q ? q.droppedVideoFrames : -1,
+    };
+    if (statsPrev) {
+      const dt = (now - statsPrev.wall) / 1000;
+      if (dt > 1) {
+        const level = hls && hls.levels && hls.currentLevel >= 0 ? hls.levels[hls.currentLevel] : null;
+        clog('stats', {
+          lvl: level ? level.height : -1,
+          ct: +video.currentTime.toFixed(1),
+          // Скорость currentTime за окно: 1.0 = реальное время. У зрителя ресинки
+          // маскируют застой (прыжки вперёд суммируются в ct) — поэтому решающий
+          // показатель именно fps: сколько кадров реально показано в секунду.
+          speed: +((snap.ct - statsPrev.ct) / dt).toFixed(2),
+          fps: snap.frames >= 0 && statsPrev.frames >= 0 ? +((snap.frames - statsPrev.frames) / dt).toFixed(1) : -1,
+          drop: snap.dropped >= 0 && statsPrev.dropped >= 0 ? snap.dropped - statsPrev.dropped : -1,
+          buf: bufferAheadS(),
+          ranges: video.buffered.length,
+          paused: video.paused ? 1 : 0,
+          rs: video.readyState,
+          vis: document.visibilityState === 'visible' ? 1 : 0,
+          leader: isLeader() ? 1 : 0,
+        });
+      }
+    }
+    statsPrev = snap;
+  }
+
+  function clogHlsError(data) {
+    // buffer*Error могут сыпаться раз в секунду — дедупим одинаковые в 10с окне
+    const key = data.type + '/' + data.details;
+    const now = Date.now();
+    if (key === lastHlsErr && now - lastHlsErrAt < 10_000) return;
+    lastHlsErr = key;
+    lastHlsErrAt = now;
+    clog('hlsError', { details: data.details, type: data.type, fatal: data.fatal ? 1 : 0, buf: bufferAheadS() });
+  }
+
+  video.addEventListener('error', () => {
+    const err = video.error;
+    clog('videoError', {
+      code: err ? err.code : -1,
+      msg: err && err.message ? String(err.message).slice(0, 120) : '',
+    });
+  });
+  video.addEventListener('waiting', () => {
+    const now = Date.now();
+    if (now - lastWaitAt < 5000) return;
+    lastWaitAt = now;
+    clog('waiting', { ct: +video.currentTime.toFixed(1), buf: bufferAheadS(), rs: video.readyState });
+  });
+
+  clog('hello', {
+    gpu: gpuString(),
+    screen: `${screen.width}x${screen.height}@${window.devicePixelRatio}`,
+    cores: navigator.hardwareConcurrency || 0,
+    mem: navigator.deviceMemory || 0,
+    hlsjs: window.Hls ? (window.Hls.version || 'yes') : 'none',
+    mse: !!(window.Hls && window.Hls.isSupported()),
+  });
+
+  setInterval(() => {
+    collectStats();
+    flushLogs(false);
+  }, LOG_FLUSH_MS);
+  window.addEventListener('pagehide', () => flushLogs(true));
 
   function isMovie() {
     return playlist && playlist.seasons.length === 1 && playlist.seasons[0].id === 'film';
@@ -442,6 +581,9 @@
     const target = msg.currentTime + (video.paused ? 0 : lag);
     const drift = video.currentTime - target;
     if (Math.abs(drift) > DRIFT_RESYNC_THRESHOLD_S) {
+      // Постоянные ресинки (6/мин) = видео у зрителя само не идёт, его тащит
+      // heartbeat — так выглядел зависший декодер в кейсе Elkjul.
+      clog('resync', { drift: +drift.toFixed(2), ct: +video.currentTime.toFixed(1), buf: bufferAheadS() });
       suppress = true;
       video.currentTime = target;
       queueMicrotask(() => (suppress = false));
@@ -462,6 +604,7 @@
 
     sourceVersion = msg.version;
     current = msg.current;
+    clog('source', { v: msg.version, sameEpisode: sameEpisode ? 1 : 0 });
     updateCurrentBadge();
 
     if (sameEpisode && hls) {
@@ -486,6 +629,7 @@
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}${BASE}/ws/${roomId}`);
     ws.addEventListener('close', () => {
+      clog('wsClose', {});
       toast('Связь потеряна, переподключаюсь…', 1500);
       setTimeout(connect, 1500);
     });
@@ -505,6 +649,8 @@
           loadSource(manifestUrl());
           applySubtitleTracks();
           applySnapshot(msg.snapshot);
+          clog('welcome', { leader: isLeader() ? 1 : 0, members: members.size, v: sourceVersion });
+          flushLogs(false); // hello + welcome уходят сразу, не ждём 20с тика
           break;
         case 'member-join':
           members.set(msg.id, { id: msg.id, name: msg.name });

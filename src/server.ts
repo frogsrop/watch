@@ -263,6 +263,42 @@ fastify.post<{
   return reply.send({ current: room.current, sourceVersion: room.sourceVersion });
 });
 
+/**
+ * Телеметрия из player.js: периодические stats (реальный fps, скорость
+ * currentTime, буфер) + события (resync, hlsError, videoError, waiting, level,
+ * source, wsClose) батчами раз в 20с. Пишем по строке на событие в общий лог:
+ *   journalctl -u watch | grep clientlog | grep <roomId>
+ * Роут с logLevel=warn, чтобы каждый батч-POST не рожал пары
+ * incoming/completed строк — поэтому пишем через fastify.log, не req.log.
+ */
+fastify.post<{ Params: { roomId: string }; Body: { client?: unknown; logs?: unknown } }>(
+  `${BASE_PATH}/api/room/:roomId/log`,
+  { logLevel: 'warn' },
+  async (req, reply) => {
+    const room = rooms.get(req.params.roomId);
+    if (!room) return reply.code(404).send({ error: 'room not found' });
+    const client = String(req.body?.client ?? '').slice(0, 16);
+    const raw = Array.isArray(req.body?.logs) ? (req.body.logs as unknown[]) : [];
+    for (const entry of raw.slice(0, 50)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      let size = 0;
+      try {
+        size = JSON.stringify(entry).length;
+      } catch {
+        continue;
+      }
+      if (size > 1000) continue; // мусор или абьюз — событие столько не весит
+      // ua/ip добавляем только к hello, чтобы не таскать их в каждой stats-строке
+      const extra =
+        (entry as { k?: unknown }).k === 'hello'
+          ? { ua: req.headers['user-agent'], ip: req.headers['x-forwarded-for'] ?? req.ip }
+          : undefined;
+      fastify.log.info({ cl: { room: room.id, client, ...extra, ...(entry as object) } }, 'clientlog');
+    }
+    return reply.code(204).send();
+  },
+);
+
 fastify.get<{ Params: { roomId: string; idx: string } }>(
   `${BASE_PATH}/hls/:roomId/sub/:idx`,
   async (req, reply) => {

@@ -162,6 +162,22 @@ CSS использует **relative** `url('fonts/inter-variable.woff2')` (не 
 - `https://lv.kinogo.ec/...` без Playwright → 403 (JS challenge).
 - `https://cinemar.cc/embed/<id>/+<token>` — 200 с обычным curl, если есть `Referer: https://lv.kinogo.ec/...`. Turnstile не использует.
 
+## Клиентская телеметрия
+
+player.js шлёт батчами (раз в 20с, `sendBeacon` на закрытии вкладки) на `POST /api/room/:id/log`:
+- `hello` — GPU-строка из WebGL (**«SwiftShader»/«llvmpipe» = аппаратное ускорение мертво**), screen, cores, deviceMemory, версия hls.js. Сервер дописывает ua + ip.
+- `stats` (каждые 20с) — `lvl` (высота уровня), `speed` (скорость currentTime, 1.0 = реальное время), **`fps` (реально показанные кадры/сек — решающий показатель: ресинки маскируют застой в `speed`, но не в `fps`)**, `drop`, `buf` (буфер от текущей позиции; 0 при `ranges>0` = дыра в буфере), `paused/rs/vis/leader`.
+- события: `resync` (drift; 6/мин = видео тащится heartbeat'ом), `hlsError` (все, не только fatal, дедуп 10с), `videoError`, `waiting`, `level`, `source`, `welcome`, `wsClose`.
+
+Сервер пишет по строке на событие (`msg: "clientlog"`, поле `cl`), роут с `logLevel: warn` — батч-POST'ы не спамят request-логи. Читать:
+
+```bash
+ssh frogsrop@frogsrop.dev 'sudo journalctl -u watch -f | grep clientlog'                  # live
+ssh frogsrop@frogsrop.dev 'sudo journalctl -u watch --since "1h ago" | grep clientlog | grep <roomId>'
+```
+
+Кейс-эталон (комната Elkjul, 2026-08-01): у зрителя сегменты качались в темпе, буфер 110с, dropped=0 — но декодер выдал 264 кадра за десятки минут (зависший HW-декодер, слайдшоу на любом качестве). С сервера был неотличим от здорового; телеметрия ловит это как `fps≈0` при `paused=0, buf>10`.
+
 ## Известные хрупкости / TODO
 
 1. **m3u8 expiry**: URL подписан с `:YYYYMMDDHH` бакетом, ~1 час валидности. После 1 часа просмотра комната перестанет грузить сегменты. Решение (не реализовано): при 403 от cinemap.cc → re-probe и обновить current.voiceFile.
