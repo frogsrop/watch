@@ -181,6 +181,11 @@ async function getBrowser(): Promise<Browser> {
   return launchPromise;
 }
 
+/** Поднять Chrome заранее, чтобы первый probe не платил за запуск. */
+export async function warmupBrowser(): Promise<void> {
+  await getBrowser();
+}
+
 export async function closeBrowser(): Promise<void> {
   if (sharedBrowser) {
     const b = sharedBrowser;
@@ -209,13 +214,54 @@ async function newContext(): Promise<BrowserContext> {
   return ctx;
 }
 
+/**
+ * Обещание, которое выполняет кто-то извне — обычно обработчик
+ * page.on('response'). Нужно, чтобы ожидающий просыпался в момент прихода
+ * ответа: до этого такие места крутили waitForTimeout(500) и теряли в среднем
+ * четверть секунды на каждом, а в плохом случае досиживали весь дедлайн, уже
+ * имея на руках нужный ответ.
+ */
+function createSignal<T>() {
+  let resolveFn!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolveFn = res;
+  });
+  return {
+    resolve: (v: T) => resolveFn(v),
+    /** Значение, либо null если не дождались за timeoutMs. */
+    wait: async (timeoutMs: number): Promise<T | null> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<null>((res) => {
+        timer = setTimeout(() => res(null), Math.max(0, timeoutMs));
+      });
+      try {
+        return await Promise.race([promise, timeout]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
 async function waitCloudflare(page: Page, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  // Ждём в самой странице вместо опроса page.title() по кругу: заголовок
+  // меняется в момент прохождения челленджа, и опрос раз в полсекунды добавлял к
+  // каждому extract'у случайные полсекунды сверху.
+  const ready = () => {
+    const t = document.title;
+    return t.length > 0 && !/just a moment|checking your browser|attention required/i.test(t);
+  };
   while (Date.now() < deadline) {
-    const title = await page.title().catch(() => '');
-    if (!/just a moment|checking your browser|attention required/i.test(title) && title.length > 0)
+    try {
+      await page.waitForFunction(ready, undefined, { timeout: deadline - Date.now(), polling: 100 });
       return;
-    await page.waitForTimeout(500);
+    } catch {
+      // Челлендж заканчивается навигацией, а она уносит контекст, в котором жил
+      // наш наблюдатель. Это не отказ — переустанавливаем его на новой странице.
+      if (Date.now() >= deadline) break;
+      await page.waitForTimeout(100);
+    }
   }
   throw new ExtractorError('cloudflare challenge did not resolve', 'cloudflare');
 }
@@ -414,6 +460,7 @@ async function captureFromLordfilm(
   try {
     const page = await context.newPage();
     let embedBody: string | null = null;
+    const embedSignal = createSignal<string>();
     // Перехватываем HTTP-ответ от api.femd.ws/embed/* — там в инлайн-JS лежит
     // makePlayer({playlist: {seasons:[...]}}). Парсим seasons-массив прямо из HTML.
     page.on('response', async (res) => {
@@ -424,6 +471,7 @@ async function captureFromLordfilm(
           const body = await res.text();
           if (body && body.length > 500) {
             embedBody = body;
+            embedSignal.resolve(body);
             dbg(`venom: captured femd embed response ${u} (${body.length} bytes)`);
           }
         } catch (e) {
@@ -436,9 +484,12 @@ async function captureFromLordfilm(
     // lordfilm не использует Cloudflare; embed iframe инжектится JS'ом lordfilm-страницы.
     await activateLazyIframes(page);
 
+    // Ответ ловит обработчик выше, поэтому просыпаемся сразу, как он придёт.
+    // Будить ленивые iframe'ы всё равно продолжаем: именно их активация и
+    // вызывает запрос к femd, так что просто ждать было бы нечего.
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline && !embedBody) {
-      await page.waitForTimeout(500);
+      if (await embedSignal.wait(Math.min(500, deadline - Date.now()))) break;
       await activateLazyIframes(page);
     }
 
@@ -472,6 +523,46 @@ async function captureFromLordfilm(
   }
 }
 
+// Чистые счётчики: полезной работы для нас не делают, а на одном ядре VPS
+// каждый их запрос отнимает время у того, зачем мы пришли. Список именно
+// запрещающий, а не разрешающий: страница собирает плеер собственным JS, и любой
+// не угаданный нами «разрешённый» хост означал бы сломанный extract.
+const AD_NOISE_HOSTS_RE =
+  /(^|\.)(google-analytics\.com|googletagmanager\.com|googlesyndication\.com|doubleclick\.net|criteo\.com|adfox\.ru|an\.yandex\.ru|mc\.yandex\.ru|top-fwz1\.mail\.ru|vk\.com)$/i;
+
+/**
+ * Отрезает от страницы то, что нам не нужно: картинки, шрифты, само видео и
+ * счётчики. Cloudflare, разметка и любой скрипт проходят как обычно — челлендж
+ * обязан пройти, а плеер собирается именно скриптами.
+ * Выключается через WATCH_KINOGO_LEAN=0, если реклама вдруг окажется нужной.
+ */
+async function blockPageNoise(page: Page): Promise<void> {
+  if (process.env.WATCH_KINOGO_LEAN === '0') return;
+  await page.route('**/*', async (route) => {
+    try {
+      const req = route.request();
+      const type = req.resourceType();
+      const url = req.url();
+      if (
+        type === 'image' ||
+        type === 'font' ||
+        type === 'media' ||
+        /\.(ts|mp4|m4s)(\?|$)/i.test(url) ||
+        AD_NOISE_HOSTS_RE.test(new URL(url).hostname)
+      ) {
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    } catch {
+      // Не угадали с разбором — пропускаем запрос, а не роняем extract.
+      try {
+        await route.continue();
+      } catch {}
+    }
+  });
+}
+
 async function captureFromKinogo(
   pageUrl: string,
   timeoutMs: number,
@@ -479,17 +570,22 @@ async function captureFromKinogo(
   const context = await newContext();
   try {
     const page = await context.newPage();
+    await blockPageNoise(page);
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await waitCloudflare(page, timeoutMs);
     await activateLazyIframes(page);
 
-    // Ждём, пока в iframe появится Cinemar-frame и player.js его пропарсит
+    // Ждём, пока в iframe появится Cinemar-frame и player.js его пропарсит.
+    // Проверяем сразу, а спим только не найдя: раньше цикл начинался с паузы, и
+    // эти 800 мс терялись всегда — даже когда playerjs уже всё распарсил.
     const deadline = Date.now() + timeoutMs;
     let playlist: PlayerStructure | null = null;
-    while (Date.now() < deadline && (!playlist || playlist.seasons.length === 0)) {
-      await page.waitForTimeout(800);
-      // активация iframe может срабатывать поздно (lazyload), повторяем
-      await activateLazyIframes(page);
+    for (let first = true; Date.now() < deadline; first = false) {
+      if (!first) {
+        await page.waitForTimeout(250);
+        // активация iframe может срабатывать поздно (lazyload), повторяем
+        await activateLazyIframes(page);
+      }
       // playerjs-эмбеды от разных провайдеров: cinemar/cinemap (kinogo),
       // plplayer/kalarona (theboys.fun), а также бывают i-trailer.ru, lv9-vid.
       const playerFrames = page.frames().filter((f) =>
@@ -504,10 +600,11 @@ async function captureFromKinogo(
         caps.push(...c);
       }
       if (caps.length > 0) {
-        playlist = structureFromCaptured(caps);
-        if (playlist.seasons.length > 0) {
+        const built = structureFromCaptured(caps);
+        if (built.seasons.length > 0) {
+          playlist = built;
           dbg(
-            `captured ${caps.length} playlists; structure: ${playlist.seasons.length} seasons, ${playlist.seasons.reduce((s, ss) => s + ss.episodes.length, 0)} episodes`,
+            `captured ${caps.length} playlists; structure: ${built.seasons.length} seasons, ${built.seasons.reduce((s, ss) => s + ss.episodes.length, 0)} episodes`,
           );
           break;
         }
@@ -791,10 +888,25 @@ interface VideoseedResolveMap {
 }
 const videoseedRawCache = new Map<string, VideoseedResolveMap>();
 const VIDEOSEED_RAW_TTL_MS = 4 * 60 * 1000;
+// Резолв идёт прямо в обработчике /hls/.../index.m3u8, поэтому по истечении
+// memoize все зрители комнаты (или несколько комнат на одном iframe) заходили
+// сюда одновременно, и каждый открывал собственный Chrome-контекст. На 1 vCPU
+// это самый дорогой способ получить один и тот же map.
+const videoseedRawInFlight = new Map<string, Promise<Map<string, string>>>();
 
 async function fetchVideoseedRawMap(iframeUrl: string): Promise<Map<string, string>> {
   const cached = videoseedRawCache.get(iframeUrl);
   if (cached && Date.now() - cached.at < VIDEOSEED_RAW_TTL_MS) return cached.map;
+  const pending = videoseedRawInFlight.get(iframeUrl);
+  if (pending) return pending;
+  const run = fetchVideoseedRawMapUncached(iframeUrl).finally(() => {
+    videoseedRawInFlight.delete(iframeUrl);
+  });
+  videoseedRawInFlight.set(iframeUrl, run);
+  return run;
+}
+
+async function fetchVideoseedRawMapUncached(iframeUrl: string): Promise<Map<string, string>> {
   const context = await newContext();
   try {
     const page = await context.newPage();
@@ -815,22 +927,24 @@ async function fetchVideoseedRawMap(iframeUrl: string): Promise<Map<string, stri
     // Videoseed иногда отдаёт redirect/503 на первый запрос. Принимаем только
     // response который реально содержит маркер Playerjs("#2..."), пропуская мусор.
     let captured: string | null = null;
+    const capturedSignal = createSignal<string>();
     page.on('response', async (res) => {
       if (captured) return;
       if (res.url() !== iframeUrl) return;
       try {
         const text = await res.text();
-        if (/new Playerjs\("#2/.test(text)) captured = text;
+        if (/new Playerjs\("#2/.test(text)) {
+          captured = text;
+          capturedSignal.resolve(text);
+        }
       } catch {}
     });
     await page.goto(wrapperUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
-    if (!captured) {
-      // Ждём появления валидного response до 15 сек (с retry внутри страницы).
-      const deadline = Date.now() + 15_000;
-      while (!captured && Date.now() < deadline) await page.waitForTimeout(500);
-    }
-    if (!captured) throw new Error('videoseed: не перехватили валидный Playerjs response');
-    const m = (captured as string).match(/new Playerjs\("([^"]+)"\)/);
+    // Страница сама повторяет запрос, если ей ответили мусором, поэтому ждём
+    // именно валидный ответ — до 15 секунд, но ровно столько, сколько нужно.
+    const body = captured ?? (await capturedSignal.wait(15_000));
+    if (!body) throw new Error('videoseed: не перехватили валидный Playerjs response');
+    const m = body.match(/new Playerjs\("([^"]+)"\)/);
     if (!m || !m[1]) throw new Error('videoseed: Playerjs(...) не найден');
     const s = m[1].substring(2).replace(/\|\|\|[^=|]+==/g, '');
     const json = Buffer.from(s, 'base64').toString('utf-8');
@@ -999,10 +1113,14 @@ async function captureFromVibix(kpId: number): Promise<PlayerStructure> {
   try {
     const page = await context.newPage();
     let embedBody: string | null = null;
+    const embedSignal = createSignal<string>();
     page.on('response', async (res) => {
       if (embedBody) return;
       if (/\/api\/v1\/embed-(serials|movies)\/\d+\?/.test(res.url())) {
-        try { embedBody = await res.text(); } catch {}
+        try {
+          embedBody = await res.text();
+          embedSignal.resolve(embedBody);
+        } catch {}
       }
     });
     await page.route('**/*', async (route) => {
@@ -1029,7 +1147,9 @@ async function captureFromVibix(kpId: number): Promise<PlayerStructure> {
       }
     });
     await page.goto('https://coldfilm.ink/', { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
-    for (let i = 0; i < 40 && !embedBody; i++) await page.waitForTimeout(500);
+    // SDK резолвит kp_id в iframe kinescopecdn асинхронно; ответ ловит обработчик
+    // выше и будит нас сразу, вместо того чтобы досиживать шаг опроса.
+    if (!embedBody) await embedSignal.wait(20_000);
     if (!embedBody) throw new ExtractorError('vibix: не перехватили embed response', 'playlist');
 
     let parsed: { p?: string; v?: number };
@@ -1197,52 +1317,58 @@ async function captureFromKinomix(pageUrl: string): Promise<{
     );
   }
 
-  let playlist: PlayerStructure = { seasons: [] };
   const errors: string[] = [];
 
+  // Провайдеры друг от друга не зависят, но раньше опрашивались строго по
+  // очереди, и каждый ждал сначала своего goto, потом своего ответа. Ждём всех
+  // вместе: работа тут почти целиком — ожидание сети и рендерера, так что даже на
+  // одном ядре они укладываются друг в друга. Playwright из них поднимают только
+  // Videoseed и Vibix, то есть максимум два контекста разом — на двух гигабайтах
+  // памяти это ещё спокойно, а больше добавлять сюда нельзя.
+  const jobs: { name: string; run: () => Promise<PlayerStructure> }[] = [];
   if (entry.ortified_id) {
-    try {
-      const collaps = await captureCollapsForKinomix(entry.ortified_id);
-      playlist = mergeStructures(playlist, 'Collaps', collaps, 'Collaps');
-    } catch (e) {
-      errors.push(`collaps: ${(e as Error).message}`);
-    }
+    const ortifiedId = entry.ortified_id;
+    jobs.push({ name: 'Collaps', run: () => captureCollapsForKinomix(ortifiedId) });
   }
   // Flixcdn выключен по умолчанию: Cloudflare Turnstile на /api/player/files
   // блокирует Playwright fingerprint (401 на cdn-cgi/challenge-platform/.../pat),
   // даже headed Google Chrome stable не проходит. Опт-ин через WATCH_FLIXCDN=1
   // (например на VPS с другим IP/историей сессий есть шанс что пройдёт).
   if (entry.flixcdn && process.env.WATCH_FLIXCDN === '1') {
-    try {
-      const flix = flixcdnPayloadToStructure(entry.flixcdn);
-      playlist = mergeStructures(playlist, 'Collaps', flix, 'Flixcdn');
-    } catch (e) {
-      errors.push(`flixcdn: ${(e as Error).message}`);
-    }
+    const flixcdn = entry.flixcdn;
+    jobs.push({ name: 'Flixcdn', run: async () => flixcdnPayloadToStructure(flixcdn) });
   }
   if (entry.videoseed_iframe) {
-    dbg(`videoseed: fetching ${entry.videoseed_iframe}`);
-    try {
-      const vs = await captureFromVideoseed(entry.videoseed_iframe);
-      dbg(`videoseed: got ${vs.seasons.length} seasons, ${vs.seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`);
-      playlist = mergeStructures(playlist, 'Collaps', vs, 'Videoseed');
-    } catch (e) {
-      dbg(`videoseed FAILED: ${(e as Error).message}`);
-      errors.push(`videoseed: ${(e as Error).message}`);
-    }
+    const iframeUrl = entry.videoseed_iframe;
+    dbg(`videoseed: fetching ${iframeUrl}`);
+    jobs.push({ name: 'Videoseed', run: () => captureFromVideoseed(iframeUrl) });
   } else {
     dbg(`videoseed: no iframe in cache for kp=${parsed.kinopoisk_id}`);
   }
   if (entry.vibix_available) {
     dbg(`vibix: capturing for kp=${parsed.kinopoisk_id}`);
-    try {
-      const vx = await captureFromVibix(parsed.kinopoisk_id);
-      dbg(`vibix: got ${vx.seasons.length} seasons, ${vx.seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`);
-      playlist = mergeStructures(playlist, 'Collaps', vx, 'Vibix');
-    } catch (e) {
-      dbg(`vibix FAILED: ${(e as Error).message}`);
-      errors.push(`vibix: ${(e as Error).message}`);
+    jobs.push({ name: 'Vibix', run: () => captureFromVibix(parsed.kinopoisk_id) });
+  }
+
+  const settled = await Promise.allSettled(jobs.map((j) => j.run()));
+
+  // Порядок слияния фиксированный, а не по времени ответа: при совпадении имён
+  // голосов дедуп добавляет суффикс провайдера, и от порядка зависит, кто
+  // останется без суффикса. Иначе одна и та же комната называла бы озвучки
+  // по-разному от запуска к запуску.
+  let playlist: PlayerStructure = { seasons: [] };
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i]!;
+    const res = settled[i]!;
+    if (res.status === 'rejected') {
+      const msg = (res.reason as Error)?.message ?? String(res.reason);
+      dbg(`${job.name} FAILED: ${msg}`);
+      errors.push(`${job.name.toLowerCase()}: ${msg}`);
+      continue;
     }
+    const got = res.value;
+    dbg(`${job.name}: got ${got.seasons.length} seasons, ${got.seasons.reduce((a, s) => a + s.episodes.length, 0)} eps`);
+    playlist = mergeStructures(playlist, 'Collaps', got, job.name);
   }
 
   if (playlist.seasons.length === 0) {
