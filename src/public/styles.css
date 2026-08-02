@@ -4,10 +4,16 @@
    Dark only. Inter Variable.
    ============================================================ */
 
+/* Файл — подмножество Inter Variable 4.001: латиница + кириллица + пунктуация,
+   563 глифа из 2937 (352 КБ → 85 КБ). Обе оси (opsz 14–32, wght 100–900) и
+   фичи cv11/ss03, которые включает body ниже, оставлены, поэтому рендер не
+   меняется. Пересобрать после правки текстов UI — scripts/subset-font.mjs;
+   он же проверяет, что каждый использованный символ попал в подмножество.
+   Второй src с format('woff2-variations') убран: это тот же файл, а такой
+   формат-хинт не понимает ни один живой браузер. */
 @font-face {
   font-family: 'Inter';
-  src: url('fonts/inter-variable.woff2') format('woff2-variations'),
-       url('fonts/inter-variable.woff2') format('woff2');
+  src: url('fonts/inter-variable.woff2') format('woff2');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -135,7 +141,6 @@ body {
   font-feature-settings: 'cv11', 'ss03';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
 }
 
 /* UI chrome — non-selectable (text cursor → arrow/pointer) */
@@ -192,14 +197,16 @@ h1 .dot {
   animation: pulse-dot 1.8s var(--ease-in-out) infinite alternate;
 }
 
+/* Анимируется только opacity — она композитится на GPU, а box-shadow нет:
+   его пришлось бы перерисовывать каждый кадр бесконечно. Свечение задано
+   статикой выше и гаснет вместе с точкой, потому что opacity применяется ко
+   всей отрисовке элемента, тень включительно. */
 @keyframes pulse-dot {
   from {
     opacity: 0.45;
-    box-shadow: 0 0 8px rgba(var(--brand-rgb), 0.25);
   }
   to {
     opacity: 1;
-    box-shadow: 0 0 18px rgba(var(--brand-rgb), 0.55);
   }
 }
 

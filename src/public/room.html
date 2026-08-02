@@ -5,15 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>watch — комната</title>
   <link rel="icon" href="{{BASE_PATH}}/static/favicon.svg" type="image/svg+xml" />
-  <link rel="preload" href="{{BASE_PATH}}/static/fonts/inter-variable.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="{{BASE_PATH}}/static/styles.css" />
   <script>window.__WATCH_BASE_PATH = '{{BASE_PATH}}';</script>
   <!-- hls.js лежит у нас, а не на jsdelivr: из России до него не всегда доезжают,
        а блокирующий тег в head means зритель ждёт чужой CDN прежде чем увидит
        страницу. defer на обоих скриптах сохраняет порядок и не тормозит парсинг —
-       window.Hls нужен только после welcome по WebSocket. -->
-  <script defer src="{{BASE_PATH}}/static/vendor/hls.min.js"></script>
+       window.Hls нужен только после welcome по WebSocket.
+
+       Порядок с preload шрифта ниже — не случайный. Chrome даёт preload'у шрифта
+       приоритет выше, чем defer-скрипту, и в начале загрузки пропускает только
+       пару запросов сразу: шрифт с таблицей стилей занимали оба слота, и
+       hls.min.js — файл, без которого плеер не стартует вообще — ждал их. Теги
+       одного приоритета уходят в порядке обнаружения, поэтому скрипты объявлены
+       раньше, а fetchpriority поднимает hls.js до уровня шрифта.
+       Сам preload оставлен: без него шрифт находится из CSS и получает
+       приоритет ещё ВЫШЕ, чем с ним, только на round-trip позже. -->
+  <script defer fetchpriority="high" src="{{BASE_PATH}}/static/vendor/hls.min.js"></script>
   <script defer src="{{BASE_PATH}}/static/player.js"></script>
+  <link rel="preload" href="{{BASE_PATH}}/static/fonts/inter-variable.woff2" as="font" type="font/woff2" crossorigin />
 </head>
 <body class="page-room">
   <div class="stage">
