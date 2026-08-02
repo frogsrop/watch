@@ -460,8 +460,19 @@ hostname машины — `mail.frogsrop.org`). Первичная устано�
 | Кеш сегментов и субтитров | `/etc/nginx/conf.d/watch-cache.conf` + regex-локация `(p\|sub)` в vhost | `X-Cache-Status: HIT` на повторном запросе |
 | gzip | внутри наших локаций в vhost (не в http{} — vhost общий) | `curl -H 'Accept-Encoding: gzip' -sI .../index.m3u8` → `content-encoding: gzip` |
 | keepalive к Node | `upstream watch_node` в conf.d + `Connection ""` в локациях | `sudo grep -A3 "upstream watch_node" /etc/nginx/conf.d/watch-cache.conf` |
-| HTTP/3 (QUIC) | `listen 443 quic` в vhost, `ufw allow 443/udp` | `curl --http3-only -sI .../api/health` → `HTTP/3 200` |
+| HTTP/3 (QUIC) | **настроен, но не работает** — см. ниже | `curl --http3-only -sI .../api/health` → `curl: (7) QUIC connection has been shut down` |
 | BBR | `/etc/sysctl.d/99-bbr.conf` + `/etc/modules-load.d/bbr.conf` | `cat /proc/sys/net/ipv4/tcp_congestion_control` → `bbr` |
+| Кеш-лог сегментов | `log_format watch` в conf.d + `access_log` в сегментной локации | `sudo tail /var/log/nginx/watch.log` → строки с `HIT`/`MISS` |
+| `tcp_slow_start_after_idle=0` | `/etc/sysctl.d/99-watch.conf` | `cat /proc/sys/net/ipv4/tcp_slow_start_after_idle` → `0` |
+
+**HTTP/3 не работает, хотя настроен** (замер 2026-08-02). nginx слушает UDP/443,
+`ufw` его пропускает, рукопожатие QUIC доходит до конца и сертификат проверяется —
+но соединение закрывается на ответе (`curl: (7) QUIC connection has been shut
+down`), а Chrome снаружи остаётся на h2 во всех запросах, несмотря на `Alt-Svc`.
+Это не последствие правок: воспроизводится и без `quic_gso`, и после полного
+`systemctl restart nginx`. Поэтому `quic_gso` в `deploy/nginx-watch-quic.conf`
+оставлен закомментированным — включать его, пока h3 не отдаёт, значит включать
+непроверяемое. Разбираться надо отдельно.
 
 BBR дал 3.4× на одиночном потоке (6.4 → 22.1 МБ/с на 25 МБ файле) и убрал
 разброс: было 4.7–8.5 МБ/с от прогона к прогону, стало 21.8–22.4. До него стоял
