@@ -1,12 +1,26 @@
 import { describe, it, expect } from 'vitest';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
+import type { Dispatcher } from 'undici';
 import {
   isAllowedHost,
   signUrl,
   verifyUrl,
   buildProxyPath,
   decodeProxyPath,
+  readTextBody,
   rewriteManifest,
 } from '../src/hls-proxy.js';
+
+/** Ответ undici в объёме, который читает readTextBody. */
+function upstreamResponse(body: Buffer, encoding?: string): Dispatcher.ResponseData {
+  return {
+    headers: encoding ? { 'content-encoding': encoding } : {},
+    body: {
+      text: async () => body.toString('utf8'),
+      arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+    },
+  } as unknown as Dispatcher.ResponseData;
+}
 
 const SECRET = 'test-secret-do-not-use-in-prod';
 const ROOM = 'roomXYZ';
@@ -125,5 +139,26 @@ describe('rewriteManifest', () => {
       SELF,
     );
     expect(rewritten).toContain('https://evil.com/seg0.ts');
+  });
+});
+
+describe('readTextBody', () => {
+  const MANIFEST = '#EXTM3U\n#EXTINF:6.000,\nseg0.ts\n';
+
+  it('читает несжатый ответ как есть', async () => {
+    expect(await readTextBody(upstreamResponse(Buffer.from(MANIFEST)))).toBe(MANIFEST);
+    expect(await readTextBody(upstreamResponse(Buffer.from(MANIFEST), 'identity'))).toBe(MANIFEST);
+  });
+
+  it('распаковывает gzip и brotli — undici сам этого не делает', async () => {
+    expect(await readTextBody(upstreamResponse(gzipSync(MANIFEST), 'gzip'))).toBe(MANIFEST);
+    expect(await readTextBody(upstreamResponse(brotliCompressSync(MANIFEST), 'br'))).toBe(MANIFEST);
+    // Регистр и пробелы в заголовке — на усмотрение CDN.
+    expect(await readTextBody(upstreamResponse(gzipSync(MANIFEST), ' GZIP '))).toBe(MANIFEST);
+  });
+
+  it('на битом теле не бросает — плейлист не распарсится и вызывающий вернёт 502', async () => {
+    const garbage = Buffer.from('not actually gzip');
+    await expect(readTextBody(upstreamResponse(garbage, 'gzip'))).resolves.toBe('not actually gzip');
   });
 });

@@ -21,11 +21,13 @@ import {
   decodeProxyPath,
   fetchUpstream,
   isAllowedHost,
+  readTextBody,
   rewriteManifest,
   verifyUrl,
 } from './hls-proxy.js';
 import { RoomManager, type Room } from './room.js';
 import { createVersionedCache } from './versioned-cache.js';
+import { createExtractGate, BusyError } from './extract-gate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -37,6 +39,9 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT
 const PROXY_SECRET = process.env.PROXY_SECRET ?? randomBytes(32).toString('hex');
 // Сколько раз перезапросить сегмент у CDN, если тот ответил 5xx.
 const UPSTREAM_RETRIES = Number(process.env.WATCH_UPSTREAM_RETRIES ?? 2);
+// Сколько extract'ов идёт одновременно и сколько ждёт очереди. См. extractGate.
+const EXTRACT_CONCURRENCY = Math.max(1, Number(process.env.WATCH_EXTRACT_CONCURRENCY ?? 2));
+const EXTRACT_QUEUE_LIMIT = Math.max(0, Number(process.env.WATCH_EXTRACT_QUEUE ?? 8));
 
 const distPublic = join(__dirname, 'public');
 const srcPublic = join(__dirname, '..', 'src', 'public');
@@ -56,16 +61,45 @@ await fastify.register(fastifyWebsocket);
 await fastify.register(fastifyStatic, {
   root: PUBLIC_DIR,
   prefix: `${BASE_PATH}/static/`,
+  // Отдаём .br/.gz рядом с файлом, если браузер их принимает (их кладёт
+  // scripts/copy-public.mjs при билде). Смысл не в разгрузке процессора, а в
+  // том, что жать можно максимальным уровнем один раз на билде, а не пятым на
+  // каждый запрос: hls.min.js это 129,8 КБ gzip против ~103 КБ brotli, и он
+  // лежит ровно на пути к первому кадру — без него плеер не стартует.
+  // nginx уже сжатый ответ не трогает (его gzip-фильтр пропускает всё с
+  // content-encoding), так что менять конфиг реверс-прокси не нужно.
+  preCompressed: true,
   // Без maxAge @fastify/send отдаёт max-age=0, и браузер ревалидирует каждый
-  // файл на каждом заходе в комнату — включая 344 КБ шрифта. Имена файлов не
+  // файл на каждом заходе в комнату — включая шрифт. Имена файлов не
   // хешируются, поэтому immutable не ставим: ETag остаётся, так что после
   // истечения срока это дешёвый 304, а не повторная загрузка. Шрифт и иконку
   // держим неделю (они не менялись с весны), скрипт и стили — час, чтобы
   // деплой доезжал до зрителей в тот же вечер.
   setHeaders(res, path) {
-    const long = /[\\/]fonts[\\/]|\.svg$/.test(path);
+    // path здесь — реально отданный файл, то есть возможно styles.css.br;
+    // без снятия суффикса иконка и шрифт теряли бы недельный срок.
+    const original = path.replace(/\.(br|gz)$/, '');
+    const long = /[\\/]fonts[\\/]|\.svg$/.test(original);
     res.setHeader('cache-control', `public, max-age=${long ? 604800 : 3600}`);
+    // preCompressed отдаёт разные тела на один URL, а Vary сам не ставит. У нас
+    // между Node и зрителем кеша нет, но промежуточный прокси иначе вправе
+    // отдать brotli тому, кто его не просил.
+    res.setHeader('vary', 'accept-encoding');
   },
+});
+
+// Ссылка с ?h= несёт хеш содержимого (их проставляет билд и подставляет
+// renderHtml), значит по этому адресу файл уже не изменится и переспрашивать
+// его незачем. Без хеша остаются прежние сроки — так работают прямые ссылки и
+// локальная разработка, где сборки с хешами нет.
+//
+// Именно onSend, а не setHeaders: туда приходит поток, а не запрос, поэтому
+// строку запроса там не увидеть; onSend же идёт после и заголовок перебивает.
+fastify.addHook('onSend', async (req, reply) => {
+  if (req.method !== 'GET' || !req.url.startsWith(`${BASE_PATH}/static/`)) return;
+  if ((req.query as { h?: string } | undefined)?.h) {
+    reply.header('cache-control', 'public, max-age=31536000, immutable');
+  }
 });
 
 // HTML читался с диска и прогонялся через regex на каждый запрос. Файлы
@@ -75,11 +109,27 @@ await fastify.register(fastifyStatic, {
 // вместо «room not found».
 const htmlCache = new Map<string, string>();
 
+// Хеши содержимого статики, посчитанные при билде. В dev-режиме файла нет —
+// тогда ссылки остаются без ?h= и работает прежнее кеширование на час.
+const assetHashes: Record<string, string> = await readFile(
+  join(PUBLIC_DIR, 'asset-hashes.json'),
+  'utf-8',
+)
+  .then((raw) => JSON.parse(raw) as Record<string, string>)
+  .catch(() => ({}));
+
 async function renderHtml(filename: string): Promise<string> {
   const cached = htmlCache.get(filename);
   if (cached !== undefined) return cached;
   const raw = await readFile(join(PUBLIC_DIR, filename), 'utf-8');
-  const html = raw.replace(/\{\{BASE_PATH\}\}/g, BASE_PATH);
+  const html = raw
+    // Сначала ссылки на статику — они тоже содержат {{BASE_PATH}}, поэтому
+    // общая замена ниже должна идти после.
+    .replace(/\{\{BASE_PATH\}\}\/static\/([A-Za-z0-9_./-]+)/g, (_m, asset: string) => {
+      const hash = assetHashes[asset];
+      return `${BASE_PATH}/static/${asset}${hash ? `?h=${hash}` : ''}`;
+    })
+    .replace(/\{\{BASE_PATH\}\}/g, BASE_PATH);
   htmlCache.set(filename, html);
   return html;
 }
@@ -123,6 +173,11 @@ function gcProbeCache() {
   }
 }
 
+const extractGate = createExtractGate({
+  concurrency: EXTRACT_CONCURRENCY,
+  queueLimit: EXTRACT_QUEUE_LIMIT,
+});
+
 /** Свежая запись из кеша, либо один общий extract на всех ожидающих. */
 async function probeOrExtract(url: string): Promise<ProbeCacheEntry> {
   gcProbeCache();
@@ -132,7 +187,8 @@ async function probeOrExtract(url: string): Promise<ProbeCacheEntry> {
   const pending = probeInFlight.get(url);
   if (pending) return pending;
 
-  const run = extractM3U8(url, { timeoutMs: 60_000 })
+  const run = extractGate
+    .run(() => extractM3U8(url, { timeoutMs: 60_000 }))
     .then((result) => {
       const entry: ProbeCacheEntry = {
         url,
@@ -167,6 +223,7 @@ fastify.post<{ Body: { url: string } }>(`${BASE_PATH}/api/probe`, async (req, re
     const entry = await probeOrExtract(url);
     return reply.send({ structure: entry.structure, cached: fromCache });
   } catch (e) {
+    if (e instanceof BusyError) return reply.code(503).send({ error: 'busy', detail: e.message });
     const msg = e instanceof ExtractorError ? `${e.stage}: ${e.message}` : (e as Error).message;
     req.log.error({ err: e }, 'probe failed');
     return reply.code(502).send({ error: 'probe_failed', detail: msg });
@@ -278,6 +335,7 @@ fastify.post<{ Body: { url: string; season?: string; episode?: string; voice?: s
         current: room.current,
       });
     } catch (e) {
+      if (e instanceof BusyError) return reply.code(503).send({ error: 'busy', detail: e.message });
       const msg = e instanceof ExtractorError ? `${e.stage}: ${e.message}` : (e as Error).message;
       req.log.error({ err: e }, 'extract failed');
       return reply.code(502).send({ error: 'extract_failed', detail: msg });
@@ -432,8 +490,13 @@ async function resolveKalaronaVoice(voiceFile: string, session: { userAgent: str
  * Ключ — комната, версия проверяется явно: switch инкрементит sourceVersion,
  * так что запись от прошлой серии не может быть отдана. Клиентский `?v=N` в URL
  * при этом продолжает работать как и раньше.
+ *
+ * Минута, а не пятнадцать секунд: единственный настоящий ограничитель — подпись
+ * upstream-плейлиста, а самая короткая из них у videoseed (~30 минут), то есть
+ * минута это 3% от неё. Всплеск при входе комнаты короткий, но опоздавший на
+ * полминуты друг теперь тоже не платит за новый заход Playwright.
  */
-const manifestCache = createVersionedCache<string>({ ttlMs: 15_000 });
+const manifestCache = createVersionedCache<string>({ ttlMs: 60_000 });
 
 /** Резолвит маркер, тянет плейлист и переписывает его. Без кеша. */
 async function buildManifest(room: Room): Promise<string> {
@@ -452,12 +515,19 @@ async function buildManifest(room: Room): Promise<string> {
     if (!resolved) throw new ManifestError('videoseed resolve failed');
     voiceFile = resolved;
   }
-  const upstream = await fetchUpstream(voiceFile, room.session);
+  // Единственное место, где мы просим у CDN сжатый ответ: плейлист читается
+  // целиком и переписывается, наружу уходит наш текст, поэтому пробрасывать
+  // чужой content-length (ради чего везде стоит identity) тут не надо. Плейлист
+  // на два часа — это сотня килобайт почти одинаковых строк, они жмутся
+  // десятикратно, и это время холодной сборки, за которое ждёт первый зритель.
+  const upstream = await fetchUpstream(voiceFile, room.session, undefined, {
+    acceptEncoding: 'gzip, br',
+  });
   if (upstream.statusCode !== 200) {
     await upstream.body.dump().catch(() => {});
     throw new ManifestError(`upstream ${upstream.statusCode}`);
   }
-  const body = await upstream.body.text();
+  const body = await readTextBody(upstream);
   return rewriteManifest(body, voiceFile, room.id, PROXY_SECRET, PUBLIC_BASE_URL);
 }
 
@@ -523,9 +593,14 @@ fastify.get<{ Params: { roomId: string; '*': string } }>(
       const ct = String(upstream.headers['content-type'] ?? '').toLowerCase();
       const isManifest = /mpegurl/.test(ct) || /\.m3u8(\?|$)/i.test(target);
 
+      // Полчаса, а не пять минут: адрес сегмента детерминирован (base64 от URL
+      // на CDN плюс подпись комнаты), так что попадание в кеш браузера всегда
+      // корректно, а промах стоит перезакачки. Помогает перезагрузке вкладки и
+      // перемотке назад за пределы буфера. На кеш nginx не влияет — там стоит
+      // proxy_ignore_headers Cache-Control.
       reply
         .code(upstream.statusCode)
-        .header('cache-control', upstream.statusCode === 200 ? 'public, max-age=300' : 'no-store');
+        .header('cache-control', upstream.statusCode === 200 ? 'public, max-age=1800' : 'no-store');
 
       if (isManifest) {
         const body = await upstream.body.text();

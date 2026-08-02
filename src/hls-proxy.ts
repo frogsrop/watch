@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Agent, request, setGlobalDispatcher, Dispatcher } from 'undici';
+import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
+import { Agent, interceptors, request, setGlobalDispatcher, Dispatcher } from 'undici';
 
 // hls.js держит впереди минуту видео, поэтому сегменты запрашиваются пачками с
 // долгими паузами между ними. С дефолтным keepAliveTimeout в 4 секунды сокет к
@@ -19,7 +20,11 @@ setGlobalDispatcher(
     connect: { timeout: 10_000 },
     headersTimeout: 20_000,
     bodyTimeout: 30_000,
-  }),
+    // Свой кеш DNS: без него каждое новое соединение к CDN идёт через
+    // dns.lookup, а тот живёт в пуле потоков libuv — там же, где сжатие и
+    // файловые операции. Соединения переоткрываются весь фильм: сегменты
+    // качаются пачками с паузами, и часть сокетов в паузах всё равно истекает.
+  }).compose(interceptors.dns({ maxTTL: 300_000, maxItems: 100 })),
 );
 
 export interface SessionHeaders {
@@ -119,6 +124,7 @@ export async function fetchUpstream(
   targetUrl: string,
   session: SessionHeaders,
   range?: string,
+  opts?: { acceptEncoding?: string },
 ): Promise<Dispatcher.ResponseData> {
   const headers: Record<string, string> = {
     'user-agent': session.userAgent,
@@ -130,10 +136,33 @@ export async function fetchUpstream(
     // ответ пришлось бы либо распаковывать, либо отдавать вместе с
     // content-encoding, и любой промах здесь ломает ABR (см. hls.js и
     // lengthComputable в server.ts). Просим identity и снимаем вопрос.
-    'accept-encoding': 'identity',
+    //
+    // Плейлист — исключение: его мы читаем целиком и переписываем, наружу уходит
+    // уже наш текст, так что чужой content-length не нужен. Там вызывающий
+    // передаёт acceptEncoding и читает ответ через readTextBody.
+    'accept-encoding': opts?.acceptEncoding ?? 'identity',
   };
   const cookie = cookieHeaderFor(targetUrl, session);
   if (cookie) headers.cookie = cookie;
   if (range) headers.range = range;
   return request(targetUrl, { method: 'GET', headers, maxRedirections: 3 });
+}
+
+/**
+ * Тело ответа текстом, с распаковкой, если CDN ответил сжатым: undici сам
+ * ничего не распаковывает, даже когда мы попросили gzip.
+ */
+export async function readTextBody(res: Dispatcher.ResponseData): Promise<string> {
+  const enc = String(res.headers['content-encoding'] ?? '').toLowerCase().trim();
+  if (!enc || enc === 'identity') return res.body.text();
+  const buf = Buffer.from(await res.body.arrayBuffer());
+  try {
+    if (enc === 'gzip') return gunzipSync(buf).toString('utf8');
+    if (enc === 'br') return brotliDecompressSync(buf).toString('utf8');
+    if (enc === 'deflate') return inflateSync(buf).toString('utf8');
+  } catch {
+    // Битый или не тот кодек — отдаём как есть: вызывающий не разберёт плейлист
+    // и вернёт 502, что честнее молчаливой подмены пустой строкой.
+  }
+  return buf.toString('utf8');
 }
