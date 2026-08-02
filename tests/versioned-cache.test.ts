@@ -110,6 +110,36 @@ describe('createVersionedCache', () => {
     expect(await cache.get('room', 2, buildNew)).toBe('new-episode');
   });
 
+  it('идущее построение прошлой версии не отдаётся тем, кто просит новую', async () => {
+    const cache = createVersionedCache<string>({ ttlMs: 1000 });
+    const d = deferred<string>();
+    const buildOld = vi.fn(() => d.promise);
+    const buildNew = vi.fn(async () => 'new-episode');
+
+    // Смена серии рассылает source-change, и вся комната просит манифест разом —
+    // ровно пока построение прошлой серии ещё не завершилось.
+    const stale = cache.get('room', 1, buildOld);
+    const viewers = [cache.get('room', 2, buildNew), cache.get('room', 2, buildNew)];
+    d.resolve('old-episode');
+
+    expect(await stale).toBe('old-episode');
+    expect(await Promise.all(viewers)).toEqual(['new-episode', 'new-episode']);
+    // Зрителей двое, а построение новой версии одно — склейка внутри версии жива.
+    expect(buildNew).toHaveBeenCalledTimes(1);
+  });
+
+  it('поздно завершившееся построение не затирает уже записанную новую версию', async () => {
+    const cache = createVersionedCache<string>({ ttlMs: 1000 });
+    const d = deferred<string>();
+
+    const stale = cache.get('room', 1, () => d.promise);
+    expect(await cache.get('room', 2, async () => 'new-episode')).toBe('new-episode');
+    d.resolve('old-episode'); // прошлая версия финиширует последней
+    await stale;
+
+    expect(await cache.get('room', 2, async () => 'rebuilt')).toBe('new-episode');
+  });
+
   it('просроченные записи выметаются, а не копятся навсегда', async () => {
     let clock = 0;
     const cache = createVersionedCache<string>({ ttlMs: 1000, now: () => clock });

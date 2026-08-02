@@ -30,7 +30,9 @@ export function createVersionedCache<T>(opts: {
   const { ttlMs } = opts;
   const now = opts.now ?? Date.now;
   const entries = new Map<string, { value: T; version: number; at: number }>();
-  const inFlight = new Map<string, Promise<T>>();
+  // Версия хранится рядом с промисом, а не только в готовых записях: построение
+  // для прошлой версии нельзя отдавать тем, кто пришёл за новой (см. get).
+  const inFlight = new Map<string, { version: number; promise: Promise<T> }>();
 
   // Просроченные записи выметаем при записи новой: иначе каждый ключ, о котором
   // когда-либо спрашивали, держал бы своё значение в памяти навсегда, а значения
@@ -50,20 +52,32 @@ export function createVersionedCache<T>(opts: {
 
       // Отказы не кешируем: следующий запрос должен попробовать снова. Все, кто
       // ждал этого построения, получат один и тот же отказ.
+      //
+      // Сверять версию тут обязательно. Смена серии рассылает source-change, по
+      // которому все клиенты разом просят index.m3u8 заново — а построение для
+      // прошлой серии в этот момент ещё идёт (для videoseed это заход
+      // Playwright, то есть секунды). Без проверки все они получали именно его,
+      // то есть манифест предыдущей серии.
       const pending = inFlight.get(key);
-      if (pending) return pending;
+      if (pending && pending.version === version) return pending.promise;
 
       const run = build()
         .then((value) => {
           const t = now();
           sweep(t);
-          entries.set(key, { value, version, at: t });
+          // Построение прошлой версии может закончиться позже нового — тогда
+          // записывать его поверх свежего нельзя.
+          const cur = entries.get(key);
+          if (!cur || cur.version <= version) entries.set(key, { value, version, at: t });
           return value;
         })
         .finally(() => {
-          inFlight.delete(key);
+          // Убираем только свою запись: пока мы строили, ключ мог занять
+          // построитель новой версии.
+          const cur = inFlight.get(key);
+          if (cur && cur.promise === run) inFlight.delete(key);
         });
-      inFlight.set(key, run);
+      inFlight.set(key, { version, promise: run });
       return run;
     },
     delete(key) {
