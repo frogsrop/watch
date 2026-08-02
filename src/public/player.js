@@ -118,7 +118,10 @@
     });
   }
 
-  function loadSource(url, startPosition) {
+  // Плеер создан заранее и ждёт welcome, чтобы узнать позицию и стартовать.
+  let awaitingStart = false;
+
+  function loadSource(url, startPosition, defer) {
     if (hls) {
       try { hls.destroy(); } catch {}
       hls = null;
@@ -128,8 +131,12 @@
     // потом мы прыгаем на нужное место, выбрасывая скачанное.
     const startAt = typeof startPosition === 'number' && startPosition > 1 ? startPosition : -1;
     if (window.Hls && window.Hls.isSupported()) {
+      awaitingStart = !!defer;
       hls = new window.Hls({
         startPosition: startAt,
+        // При defer манифест всё равно загрузится, а вот уровни и фрагменты
+        // подождут startLoad — позицию мы узнаем только из welcome.
+        autoStartLoad: !defer,
         enableWorker: true,
         lowLatencyMode: false,
         // Не тянуть 1080p в окно 800px — на узком канале это разница между
@@ -174,6 +181,27 @@
     } else {
       toast('HLS не поддерживается этим браузером');
     }
+  }
+
+  /**
+   * Просим манифест ещё до подключения к комнате.
+   *
+   * Раньше первый запрос за видео уходил только из обработчика welcome, то есть
+   * после того, как поднимется WebSocket — а это отдельное TCP-соединение со
+   * своим TLS и Upgrade, два-три round-trip'а, и при RTT до зрителей 56–133 мс
+   * они целиком стояли перед первым байтом видео.
+   *
+   * Так можно, потому что `?v` в URL — это только защита от кеша браузера:
+   * сервер её игнорирует и всегда отдаёт манифест текущего источника комнаты.
+   * Значит угадывать версию не нужно, загруженный манифест верен и для того,
+   * кто зашёл в комнату после десяти переключений серии.
+   *
+   * Нативному плееру (iOS без MSE) так нельзя: у него нет способа отложить
+   * старт, а позиции мы ещё не знаем — он идёт прежним путём из welcome.
+   */
+  function prefetchSource() {
+    if (!(window.Hls && window.Hls.isSupported())) return;
+    loadSource(manifestUrl(), undefined, true);
   }
 
   // Когда у зрителя «идёт по кадру», по логам сервера не видно, сеть это или
@@ -817,11 +845,14 @@
       try { msg = JSON.parse(e.data); } catch { return; }
       switch (msg.type) {
         case 'welcome': {
+          // Плеер, созданный до подключения, уже держит манифест — его надо не
+          // пересоздавать, а только запустить с нужной позиции.
+          const prefetched = awaitingStart && hls !== null;
           // Обрыв WebSocket'а — это ещё не смена источника. Раньше любой разрыв
           // (а переподключение идёт каждые 1.5с) пересоздавал плеер: буфер
           // выбрасывался, манифест запрашивался заново, картинка вставала. Если
           // источник тот же и плеер жив — оставляем его в покое.
-          const sameSource = hls !== null && sourceVersion === (msg.sourceVersion || 1);
+          const sameSource = !prefetched && hls !== null && sourceVersion === (msg.sourceVersion || 1);
           selfId = msg.selfId;
           leaderId = msg.leaderId;
           members = new Map(msg.members.map((m) => [m.id, m]));
@@ -830,8 +861,16 @@
           sourceVersion = msg.sourceVersion || 1;
           updateRoleBadge();
           updateCurrentBadge();
-          if (!sameSource) {
-            loadSource(manifestUrl(), msg.snapshot ? snapshotTarget(msg.snapshot) : undefined);
+          const target = msg.snapshot ? snapshotTarget(msg.snapshot) : undefined;
+          if (prefetched) {
+            awaitingStart = false;
+            applySubtitleTracks();
+            // Дорожку применяем руками: MANIFEST_PARSED мог пройти ещё до
+            // welcome, когда current был пуст и applyAudioTrack выходил вхолостую.
+            applyAudioTrack();
+            try { hls.startLoad(typeof target === 'number' && target > 1 ? target : -1); } catch {}
+          } else if (!sameSource) {
+            loadSource(manifestUrl(), target);
             applySubtitleTracks();
           }
           applySnapshot(msg.snapshot);
@@ -840,6 +879,7 @@
             members: members.size,
             v: sourceVersion,
             kept: sameSource ? 1 : 0,
+            pre: prefetched ? 1 : 0,
           });
           flushLogs(false); // hello + welcome уходят сразу, не ждём 20с тика
           break;
@@ -938,5 +978,7 @@
     toast(ok ? 'Ссылка скопирована' : 'Не удалось скопировать');
   });
 
+  // Манифест уходит в сеть первым, рукопожатие WebSocket'а идёт параллельно.
+  prefetchSource();
   connect();
 })();
