@@ -170,6 +170,25 @@
         const l = hls && hls.levels ? hls.levels[d.level] : null;
         clog('level', { h: l ? l.height : d.level });
       });
+      // Скорость загрузки фрагментов hls.js уже измеряет сам — берём его цифры,
+      // а не считаем свои. loading.start/first/end дают отдельно ожидание
+      // первого байта и время тела, что важно: потолок QUIC-окна проявляется
+      // именно в теле, а лишний RTT рукопожатия — в первом байте.
+      // networkDetails — это XHR, и запрос свой (same-origin), поэтому можно
+      // прочитать X-Cache-Status и не усреднять попадания в кеш с промахами.
+      hls.on(window.Hls.Events.FRAG_LOADED, (_e, d) => {
+        const s = d.frag && d.frag.stats;
+        if (!s || !s.loading || segAcc.length >= 400) return;
+        const xhr = d.networkDetails;
+        segAcc.push({
+          b: s.total || 0,
+          ms: s.loading.end - s.loading.first,
+          ttfb: s.loading.first - s.loading.start,
+          hit: xhr && xhr.getResponseHeader
+            ? (xhr.getResponseHeader('X-Cache-Status') === 'HIT' ? 1 : 0)
+            : 0,
+        });
+      });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
       if (startAt > 0) {
@@ -237,6 +256,35 @@
   let lastHlsErrAt = 0;
   let lastWaitAt = 0;
   let statsPrev = null;
+
+  // ===== Транспорт: h2 или h3 =====
+  // Выбирает браузер, не мы: решает Alt-Svc, из JS переключить нельзя. Поэтому
+  // просто фиксируем, что получилось — без этого поля h2 и h3 в логах
+  // неразличимы, и вопрос «стало ли быстрее» нечем закрыть даже задним числом.
+  // segAcc наполняется в FRAG_LOADED и живёт вне loadSource: hls.destroy() при
+  // смене серии снимает обработчик, а копить надо через смену.
+  let segAcc = [];
+  let segProto = '';
+
+  // PerformanceObserver, а НЕ опрос getEntriesByType: буфер ресурсных записей
+  // по умолчанию 250, а за фильм их тысячи — опрос молча перестал бы видеть
+  // новые, и поле тихо замерло бы на протоколе первых секунд.
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        if (e.nextHopProtocol && e.name.indexOf('/hls/') >= 0) segProto = e.nextHopProtocol;
+      }
+    }).observe({ type: 'resource', buffered: true });
+  } catch {}
+
+  /** Разница двух метрик navigation timing, или -1 если браузер их не дал. */
+  function navTiming(a, b) {
+    try {
+      const n = performance.getEntriesByType('navigation')[0];
+      if (!n || !n[a] || !n[b]) return -1;
+      return Math.round(n[a] - n[b]);
+    } catch { return -1; }
+  }
 
   function clog(k, data) {
     if (logQueue.length >= 80) return;
@@ -313,7 +361,20 @@
           rs: video.readyState,
           vis: document.visibilityState === 'visible' ? 1 : 0,
           leader: isLeader() ? 1 : 0,
+          // Транспорт и скорость загрузки сегментов за окно. Кладём сюда, а не
+          // в отдельное событие: journald хранит сутки, лишние строки не нужны.
+          // Goodput считается при разборе как skb*8/sms Мбит/с — намеренно не
+          // здесь, чтобы в логе лежали слагаемые, а не уже усреднённый ответ.
+          p: segProto,
+          sn: segAcc.length,
+          skb: Math.round(segAcc.reduce((a, x) => a + x.b, 0) / 1024),
+          sms: Math.round(segAcc.reduce((a, x) => a + x.ms, 0)),
+          sttfb: segAcc.length
+            ? Math.round(segAcc.reduce((a, x) => a + x.ttfb, 0) / segAcc.length)
+            : -1,
+          shit: segAcc.reduce((a, x) => a + x.hit, 0),
         });
+        segAcc = [];
       }
     }
     statsPrev = snap;
@@ -350,6 +411,18 @@
     mem: navigator.deviceMemory || 0,
     hlsjs: window.Hls ? (window.Hls.version || 'yes') : 'none',
     mse: !!(window.Hls && window.Hls.isSupported()),
+    // ВНИМАНИЕ при разборе: у зашедшего ПЕРВЫЙ раз это всегда h2 — Alt-Svc
+    // поднимает h3 только на СЛЕДУЮЩЕМ соединении. Читать это поле как
+    // «протокол зрителя» — очевидная неверная трактовка; настоящий транспорт
+    // сегментов лежит в поле `p` события stats.
+    proto: navTiming('responseStart', 'requestStart') >= 0
+      ? (performance.getEntriesByType('navigation')[0].nextHopProtocol || '?')
+      : '?',
+    // Разбивка установки соединения — то, чем измеряется цена quic_retry:
+    // Retry добавляет ровно один round-trip, и он виден здесь, а не в goodput.
+    ct: navTiming('connectEnd', 'connectStart'),
+    tls: navTiming('connectEnd', 'secureConnectionStart'),
+    nttfb: navTiming('responseStart', 'requestStart'),
   });
 
   setInterval(() => {
